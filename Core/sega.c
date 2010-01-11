@@ -216,11 +216,10 @@ static uint32 get32msb(uint8 *src) {
 sint32 EMU_CALL sega_upload_program(void *state, void *program, uint32 size) {
   uint32 start;
   if(size < 5) return -1;
+  start = get32lsb((uint8*)program);
   if(HAVE_SATSOUND) {
-    start = get32msb((uint8*)program);
     satsound_upload_to_ram(SATSOUNDSTATE, start, ((uint8*)program) + 4, size - 4);
   } else if(HAVE_DCSOUND) {
-    start = get32lsb((uint8*)program);
     dcsound_upload_to_ram(DCSOUNDSTATE, start, ((uint8*)program) + 4, size - 4);
   } else {
     return -1;
