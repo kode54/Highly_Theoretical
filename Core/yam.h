@@ -40,6 +40,9 @@ void   EMU_CALL yam_scsp_store_reg(void *state, uint32 a, uint32 d, uint32 mask,
 uint8* EMU_CALL yam_get_interrupt_pending_ptr(void *state);
 uint32 EMU_CALL yam_get_min_samples_until_interrupt(void *state);
 
+void   EMU_CALL yam_prepare_dynacode(void *state);
+void   EMU_CALL yam_unprepare_dynacode(void *state);
+
 /////////////////////////////////////////////////////////////////////////////
 
 #ifdef __cplusplus

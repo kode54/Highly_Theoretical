@@ -465,9 +465,6 @@ void EMU_CALL yam_clear_state(void *state, uint8 version) {
 
   // Enable DSP dynarec
   YAMSTATE->dsp_dyna_enabled = 1;
-
-  // Prepare dynamic recompilation buffer
-  VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_EXECUTE_READWRITE, (DWORD *) &i );
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2912,6 +2909,20 @@ void EMU_CALL yam_flush(void *state) {
     YAMSTATE->out_pending -= n;
     if(YAMSTATE->out_buf) { YAMSTATE->out_buf += 2 * n; }
   }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Prepare or unprepare dynacode buffer for execution
+//
+void EMU_CALL yam_prepare_dynacode(void *state) {
+  DWORD i;
+  VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_EXECUTE_READWRITE, &i );
+}
+
+void EMU_CALL yam_unprepare_dynacode(void *state) {
+  DWORD i;
+  VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_READWRITE, &i );
 }
 
 /////////////////////////////////////////////////////////////////////////////
