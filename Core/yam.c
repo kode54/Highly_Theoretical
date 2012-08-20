@@ -12,13 +12,18 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <math.h>
 
 // no 'conversion from _blah_ possible loss of data' warnings
 #pragma warning (disable: 4244)
 
 /////////////////////////////////////////////////////////////////////////////
 
+#ifdef DISABLE_SSF
+#define RENDERMAX (200)
+#else
 #define RENDERMAX (1) // (200)
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -93,39 +98,142 @@ static sint32 qtable[32] = {
 0x1C00,0x1D00,0x1E00,0x1F00
 };
 
-static uint8 pan_att_l[32] = { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,32,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
-static uint8 pan_att_r[32] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,32 };
+static const float SDLT_AICA[16]={-1000000.0,-42.0,-39.0,-36.0,-33.0,-30.0,-27.0,-24.0,-21.0,-18.0,-15.0,-12.0,-9.0,-6.0,-3.0,0.0};
+static const float SDLT_SCSP[8]={-1000000.0,-36.0,-30.0,-24.0,-18.0,-12.0,-6.0,0.0};
+
+static sint32 LPANTABLE_SCSP[0x10000];
+static sint32 RPANTABLE_SCSP[0x10000];
+
+static sint32 LPANTABLE_AICA[0x20000];
+static sint32 RPANTABLE_AICA[0x20000];
+
+#define SHIFT   10
+#define FIX(v)  ((sint32) ((float) (1<<SHIFT)*(v)))
+
+static void yam_init_pan_tables()
+{
+  uint32 i;
+  for(i=0;i<0x10000;++i) {
+    int iTL =(i>>0x0)&0xff;
+    int iPAN=(i>>0x8)&0x1f;
+    int iSDL=(i>>0xD)&0x07;
+    float TL=1.0;
+    float SegaDB=0;
+    float fSDL=1.0;
+    float PAN=1.0;
+    float LPAN,RPAN;
+
+    if(iTL&0x01) SegaDB-=0.4;
+    if(iTL&0x02) SegaDB-=0.8;
+    if(iTL&0x04) SegaDB-=1.5;
+    if(iTL&0x08) SegaDB-=3;
+    if(iTL&0x10) SegaDB-=6;
+    if(iTL&0x20) SegaDB-=12;
+    if(iTL&0x40) SegaDB-=24;
+    if(iTL&0x80) SegaDB-=48;
+
+    TL=pow(10.0,SegaDB/20.0);
+
+    SegaDB=0;
+    if(iPAN&0x1) SegaDB-=3;
+    if(iPAN&0x2) SegaDB-=6;
+    if(iPAN&0x4) SegaDB-=12;
+    if(iPAN&0x8) SegaDB-=24;
+
+    if((iPAN&0xf)==0xf) PAN=0.0;
+    else PAN=pow(10.0,SegaDB/20.0);
+
+    if(iPAN<0x10)
+    {
+      LPAN=PAN;
+      RPAN=1.0;
+    }
+    else
+    {
+      RPAN=PAN;
+      LPAN=1.0;
+    }
+
+    if(iSDL)
+      fSDL=pow(10.0,(SDLT_SCSP[iSDL])/20.0);
+    else
+      fSDL=0.0;
+
+    LPANTABLE_SCSP[i]=FIX((4.0*LPAN*TL*fSDL));
+    RPANTABLE_SCSP[i]=FIX((4.0*RPAN*TL*fSDL));
+  }
+
+  for(i=0;i<0x20000;++i) {
+    int iTL =(i>>0x0)&0xff;
+    int iPAN=(i>>0x8)&0x1f;
+    int iSDL=(i>>0xD)&0x0F;
+    float TL=1.0;
+    float SegaDB=0;
+    float fSDL=1.0;
+    float PAN=1.0;
+    float LPAN,RPAN;
+
+    if(iTL&0x01) SegaDB-=0.4;
+    if(iTL&0x02) SegaDB-=0.8;
+    if(iTL&0x04) SegaDB-=1.5;
+    if(iTL&0x08) SegaDB-=3;
+    if(iTL&0x10) SegaDB-=6;
+    if(iTL&0x20) SegaDB-=12;
+    if(iTL&0x40) SegaDB-=24;
+    if(iTL&0x80) SegaDB-=48;
+
+    TL=pow(10.0,SegaDB/20.0);
+
+    SegaDB=0;
+    if(iPAN&0x1) SegaDB-=3;
+    if(iPAN&0x2) SegaDB-=6;
+    if(iPAN&0x4) SegaDB-=12;
+    if(iPAN&0x8) SegaDB-=24;
+
+    if((iPAN&0xf)==0xf) PAN=0.0;
+    else PAN=pow(10.0,SegaDB/20.0);
+
+    if(iPAN<0x10)
+    {
+      LPAN=PAN;
+      RPAN=1.0;
+    }
+    else
+    {
+      RPAN=PAN;
+      LPAN=1.0;
+    }
+
+    if(iSDL)
+      fSDL=pow(10.0,(SDLT_AICA[iSDL])/20.0);
+    else
+      fSDL=0.0;
+
+    LPANTABLE_AICA[i]=FIX((4.0*LPAN*TL*fSDL));
+    RPANTABLE_AICA[i]=FIX((4.0*RPAN*TL*fSDL));
+  }
+}
 
 static void convert_stereo_send_level(
-  uint8 sdl, uint8 pan,
-  uint8 *att_l, uint8 *att_r,
-  sint32 *lin_l, sint32 *lin_r
+  uint8 tl, uint8 sdl, uint8 pan,
+  sint32 *vol_l, sint32 *vol_r,
+  uint32 version
 ) {
-  uint8 al = 0, ar = 0;
-  sint32 ll = 0, lr = 0;
-  sdl &= 0xF;
-  if(sdl) {
-    pan &= 0x1F;
-    al = sdl ^ 0xF;
-    ar = sdl ^ 0xF;
-    al += pan_att_l[pan];
-    ar += pan_att_r[pan];
-    ll = 4 - (al & 1);
-    lr = 4 - (ar & 1);
-    al >>= 1; al += 2;
-    ar >>= 1; ar += 2;
-    if(al >= 16) { al = 0; ll = 0; }
-    if(ar >= 16) { ar = 0; lr = 0; }
+  uint32 Enc = (tl<<0) | (pan<<8) | (sdl<<13);
+  if (version == 1) {
+    Enc &= 0xFFFF;
+    *vol_l = LPANTABLE_SCSP[Enc];
+    *vol_r = RPANTABLE_SCSP[Enc];
+  } else {
+    *vol_l = LPANTABLE_AICA[Enc];
+    *vol_r = RPANTABLE_AICA[Enc];
   }
-  *att_l = al;
-  *att_r = ar;
-  *lin_l = ll;
-  *lin_r = lr;
 }
 
 /////////////////////////////////////////////////////////////////////////////
 
 sint32 EMU_CALL yam_init(void) {
+  yam_init_pan_tables();
   return 0;
 }
 
@@ -482,8 +590,8 @@ void EMU_CALL yam_clear_state(void *state, uint8 version) {
 FILE *logfile = NULL;
 
 static void logf(const char *fmt, ...) {
-	va_list a;
-	va_start(a, fmt);
+    va_list a;
+    va_start(a, fmt);
   if(!logfile) {
     logfile=fopen("C:\\Corlett\\yam.log","wb");
   }
@@ -822,13 +930,13 @@ static uint32 chan_scsp_load_reg(struct YAM_STATE *state, uint8 ch, uint8 a) {
     break;
   case 0x14: // DSPInputSelect
     d  = (((uint32)(chan->dspchan  )) & 0x000F) <<  3;
-    d |= (((uint32)(chan->dsplevel )) & 0x000E) >>  1;
+    d |= (((uint32)(chan->dsplevel )) & 0x0007) >>  0;
     break;
   case 0x16: // SendLevels
-    d  = (((uint32)(chan->disdl    )) & 0x000E) << 12;
+    d  = (((uint32)(chan->disdl    )) & 0x0007) << 13;
     d |= (((uint32)(chan->dipan    )) & 0x001F) <<  8;
     if(ch < 18) {
-      d |= (((uint32)(state->efsdl[ch])) & 0x0E) << 4;
+      d |= (((uint32)(state->efsdl[ch])) & 0x07) << 5;
       d |= (((uint32)(state->efpan[ch])) & 0x1F) << 0;
     }
     break;
@@ -961,8 +1069,7 @@ static void chan_scsp_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
     break;
   case 0x14: // DSPInputSelect
     if(mask & 0x00FF) {
-      chan->dsplevel = (d << 1) & 0xE;
-      if(chan->dsplevel) chan->dsplevel |= 1;
+      chan->dsplevel = d & 0x7;
       chan->dspchan = (d >> 3) & 0xF;
     }
     break;
@@ -970,14 +1077,12 @@ static void chan_scsp_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
     if(mask & 0x00FF) {
       if(ch < 18) {
         state->efpan[ch] = d & 0x1F;
-        state->efsdl[ch] = (d >> 4) & 0xE;
-        if(state->efsdl[ch]) state->efsdl[ch] |= 1;
+        state->efsdl[ch] = (d >> 5) & 0x7;
       }
     }
     if(mask & 0xFF00) {
       chan->dipan = (d >> 8) & 0x1F;
-      chan->disdl = (d >> 12) & 0xE;
-      if(chan->disdl) chan->disdl |= 1;
+      chan->disdl = (d >> 13) & 0x7;
     }
     break;
   }
@@ -1525,16 +1630,16 @@ uint32 EMU_CALL yam_scsp_load_reg(void *state, uint32 a, uint32 mask) {
     }
 
     break;
-	case 0x412:
-		d = YAMSTATE->dmea & 0xFFFF;
-		break;
-	case 0x414:
-		d = (((uint32)(YAMSTATE->dmea)) & 0xF0000) >> 4;
-		d |= (((uint32)(YAMSTATE->drga)) & 0xFFE) << 0;
-		break;
-	case 0x416:
-		d = (((uint32)(YAMSTATE->dtlg)) & 0xFFE) << 0;
-		break;
+  case 0x412:
+    d = YAMSTATE->dmea & 0xFFFF;
+    break;
+  case 0x414:
+    d = (((uint32)(YAMSTATE->dmea)) & 0xF0000) >> 4;
+    d |= (((uint32)(YAMSTATE->drga)) & 0xFFE) << 0;
+    break;
+  case 0x416:
+    d = (((uint32)(YAMSTATE->dtlg)) & 0xFFE) << 0;
+    break;
   case 0x418:
     d  = (((uint32)(YAMSTATE->tctl[0])) & 0x7) << 8;
     d |= (((uint32)(YAMSTATE->tim[0])) & 0xFF) << 0;
@@ -1611,17 +1716,17 @@ void EMU_CALL yam_scsp_store_reg(void *state, uint32 a, uint32 d, uint32 mask, u
     }
     break;
   case 0x412: // DMA 
-	  if(mask & 0x00FF) { YAMSTATE->dmea = (YAMSTATE->dmea & 0xFFF00) | (d & 0xFF); }
-	  if(mask & 0xFF00) { YAMSTATE->dmea = (YAMSTATE->dmea & 0xF00FF) | (d & 0xFF00); }
-	  break;
+    if(mask & 0x00FF) { YAMSTATE->dmea = (YAMSTATE->dmea & 0xFFF00) | (d & 0xFF); }
+    if(mask & 0xFF00) { YAMSTATE->dmea = (YAMSTATE->dmea & 0xF00FF) | (d & 0xFF00); }
+    break;
   case 0x414:
-	  if(mask & 0xFF) { YAMSTATE->drga = (YAMSTATE->drga & 0xF00) | (d & 0xFE); }
-	  if(mask & 0xFF00) { YAMSTATE->drga = (YAMSTATE->drga & 0x0FF) | (d & 0xF00); YAMSTATE->dmea = (YAMSTATE->dmea & 0xFFFF) | ((d & 0xF000) << 4); }
-	  break;
+    if(mask & 0xFF) { YAMSTATE->drga = (YAMSTATE->drga & 0xF00) | (d & 0xFE); }
+    if(mask & 0xFF00) { YAMSTATE->drga = (YAMSTATE->drga & 0x0FF) | (d & 0xF00); YAMSTATE->dmea = (YAMSTATE->dmea & 0xFFFF) | ((d & 0xF000) << 4); }
+    break;
   case 0x416:
-	  if(mask & 0xFF) { YAMSTATE->dtlg = (YAMSTATE->dtlg & 0xF00) | (d & 0xFE); }
-	  if(mask & 0xFF00) { YAMSTATE->dtlg = (YAMSTATE->dtlg & 0xFF) | (d & 0xF00); }
-	  break;
+    if(mask & 0xFF) { YAMSTATE->dtlg = (YAMSTATE->dtlg & 0xF00) | (d & 0xFE); }
+    if(mask & 0xFF00) { YAMSTATE->dtlg = (YAMSTATE->dtlg & 0xFF) | (d & 0xF00); }
+    break;
   case 0x418: // TimerAControl
     if(mask & 0x00FF) { YAMSTATE->tim[0] = d & 0xFF; }
     if(mask & 0xFF00) { YAMSTATE->tctl[0] = (d >> 8) & 7; }
@@ -1968,12 +2073,12 @@ static void readnextsample(
   //
   playpos = chan->playpos;
   if(chan->mdl && chan->mdxsl && chan->mdysl) {
-	  sint32 smp = (state->ringbuf[(state->bufptr + chan->mdxsl)&63] + state->ringbuf[(state->bufptr + chan->mdysl)&63]) / 2;
+    sint32 smp = (state->ringbuf[(state->bufptr + chan->mdxsl)&63] + state->ringbuf[(state->bufptr + chan->mdysl)&63]) / 2;
 
-	  smp <<= 0x0A;
-	  smp >>= 0x1A - chan->mdl;
+    smp <<= 0x0A;
+    smp >>= 0x1A - chan->mdl;
 
-	  playpos += smp;
+    playpos += smp;
   }
   switch(chan->pcms) {
   case 0: // 16-bit signed LSB-first
@@ -2093,8 +2198,7 @@ static uint32 generate_samples(
       if(!(chan->voff)) {
         uint32 attenuation;
         sint32 linearvol;
-        attenuation = ((uint32)(chan->tl)) << 2;
-        attenuation += ((uint32)(chan->envlevel)) & ((uint32)(chan->envlevelmask[chan->envstate]));
+        attenuation = ((uint32)(chan->envlevel)) & ((uint32)(chan->envlevelmask[chan->envstate]));
         // LFO amplitude modulation
         if(chan->alfos) {
           uint32 att_wave_y = 0;
@@ -2135,7 +2239,6 @@ static uint32 generate_samples(
         chan->lpp1 = s;
       }
       // Write output
-      s <<= 4;
       buf[g] = s;
     }
     //
@@ -2263,40 +2366,54 @@ static void render_and_add_channel(
   rendersamples = generate_samples(
     state,
     chan,
-    (directout || fxout || !chan->stwinh) ? localbuf : NULL,
+    (directout || fxout || (state->version == 1 && !chan->stwinh)) ? localbuf : NULL,
     odometer,
     samples
   );
 
-  if (!chan->stwinh) {
-	  for (i = 0; i < rendersamples; i++) {
-		  sint32 sample = localbuf[i] >> 4;
-		  if ((sint16)sample != sample) sample = 0x8000 ^ (sample >> 31);
-		  state->ringbuf[(state->bufptr + i*32)&63] = (sint16)sample;
-	  }
+  if (state->version == 1 && !chan->stwinh) {
+    sint32 vol_l, vol_r;
+    convert_stereo_send_level(
+      chan->tl,
+      0x7,
+      0x0,
+      &vol_l, &vol_r,
+      1
+    );
+    for (i = 0; i < rendersamples; i++) {
+      sint32 sample = (localbuf[i] * vol_l) >> SHIFT;
+      if ((sint16)sample != sample) sample = 0x8000 ^ (sample >> 31);
+      state->ringbuf[(state->bufptr + i*32)&63] = (sint16)sample;
+    }
   }
 
   // Add to output
   if(directout) {
-    uint8 att_l, att_r;
-    sint32 lin_l, lin_r;
+    sint32 vol_l, vol_r;
     convert_stereo_send_level(
+      chan->tl,
       chan->disdl,
       (state->mono) ? 0 : (chan->dipan),
-      &att_l, &att_r, &lin_l, &lin_r
+      &vol_l, &vol_r,
+      state->version
     );
     for(i = 0; i < rendersamples; i++) {
-      directout[0] += (localbuf[i]*lin_l) >> att_l;
-      directout[1] += (localbuf[i]*lin_r) >> att_r;
+      directout[0] += (localbuf[i]*vol_l) >> SHIFT;
+      directout[1] += (localbuf[i]*vol_r) >> SHIFT;
       directout += 2;
     }
   }
   if(fxout) {
-    uint32 att = (chan->dsplevel) ^ 0xF;
-    sint32 lin = 4 - (att & 1);
-    att >>= 1; att += 2;
+    sint32 vol_l, vol_r;
+    convert_stereo_send_level(
+      chan->tl,
+      chan->dsplevel,
+      0,
+      &vol_l, &vol_r,
+      state->version
+    );
     for(i = 0; i < rendersamples; i++) {
-      fxout[0] += (localbuf[i]*lin) >> att;
+      fxout[0] += (localbuf[i]*vol_l) >> SHIFT+1;
       fxout += 16;
     }
   }
@@ -2810,10 +2927,8 @@ static void render_effects(
 ) {
   dsp_sample_t samplefunc;
   uint32 i, j;
-  uint8 efatt_l[16];
-  uint8 efatt_r[16];
-  sint32 eflin_l[16];
-  sint32 eflin_r[16];
+  sint32 efvol_l[16];
+  sint32 efvol_r[16];
 
   if(state->dsp_dyna_enabled) {
     if(!(state->dsp_dyna_valid)) {
@@ -2829,10 +2944,11 @@ static void render_effects(
   //
   for(j = 0; j < 16; j++) {
     convert_stereo_send_level(
+      0x00,
       state->efsdl[j],
       (state->mono) ? 0 : state->efpan[j],
-      efatt_l + j, efatt_r + j,
-      eflin_l + j, eflin_r + j
+      efvol_l + j, efvol_r + j,
+      state->version
     );
   }
   //
@@ -2860,8 +2976,8 @@ static void render_effects(
     for(j = 0; j < 16; j++) if(state->efsdl[j]) {
       sint32 ef = (sint32)((sint16)(state->efreg[j]));
       ef <<= 4;
-      out[0] += (ef*eflin_l[j]) >> efatt_l[j];
-      out[1] += (ef*eflin_r[j]) >> efatt_r[j];
+      out[0] += (ef*efvol_l[j]) >> SHIFT;
+      out[1] += (ef*efvol_r[j]) >> SHIFT;
     }
   }
 
@@ -2925,7 +3041,7 @@ fclose(f);
       wantreverb ? (fxbus + chan->dspchan) : NULL,
       odometer, samples
     );
-	state->bufptr++;
+    state->bufptr++;
   }
   //
   // Emulate DSP effects if desired
@@ -2935,14 +3051,14 @@ fclose(f);
   // Scale, clip and copy output
   //
   if(buf) {
-    uint32 att = state->mvol ^ 0xF;
-    sint32 lin = 4 - (att & 1);
-    att >>= 1; att += 2; att += 4;
+    sint32 vol_l, shift;
+    convert_stereo_send_level(0x00, state->mvol, 0x00, &vol_l, &shift, 2);
+    shift = SHIFT + 3 + state->version;
     for(i = 0; i < samples; i++) {
       sint32 l = outbuf[2 * i + 0];
       sint32 r = outbuf[2 * i + 1];
-      l *= lin; l >>= att;
-      r *= lin; r >>= att;
+      l *= vol_l; l >>= shift;
+      r *= vol_l; r >>= shift;
       if(l < (-0x8000)) l = (-0x8000);
       if(r < (-0x8000)) r = (-0x8000);
       if(l > ( 0x7FFF)) l = ( 0x7FFF);
