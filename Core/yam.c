@@ -2413,7 +2413,7 @@ static void render_and_add_channel(
       state->version
     );
     for(i = 0; i < rendersamples; i++) {
-      fxout[0] += (localbuf[i]*vol_l) >> SHIFT+1;
+      fxout[0] += (localbuf[i]*vol_l) >> (SHIFT-2);
       fxout += 16;
     }
   }
@@ -2975,7 +2975,6 @@ static void render_effects(
     //
     for(j = 0; j < 16; j++) if(state->efsdl[j]) {
       sint32 ef = (sint32)((sint16)(state->efreg[j]));
-      ef <<= 4;
       out[0] += (ef*efvol_l[j]) >> SHIFT;
       out[1] += (ef*efvol_r[j]) >> SHIFT;
     }
