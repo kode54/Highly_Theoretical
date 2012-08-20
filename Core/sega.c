@@ -75,11 +75,17 @@ sint32 EMU_CALL sega_init(void) {
 
   if(library_was_initialized) return 0;
 
+#ifndef DISABLE_SSF
   r = satsound_init(); if(r) return r;
+#endif
   r = dcsound_init(); if(r) return r;
   r = arm_init(); if(r) return r;
   r = yam_init(); if(r) return r;
+#ifndef DISABLE_SSF
+#ifdef USE_STARSCREAM
   r = s68000_init(); if(r) return r;
+#endif
+#endif
 
   library_was_initialized = 1;
   return 0;
@@ -94,8 +100,15 @@ const char* EMU_CALL sega_getversion(void) {
   static char rv[500];
   int sl = strlen(s);
   memcpy(rv, s, sl);
+#ifndef DISABLE_SSF
   rv[sl] = '\n';
+#ifdef USE_STARSCREAM
   strcpy(rv+sl+1, s68000_get_version());
+#else
+  strcpy(rv+sl+1, "C68K");
+#endif
+#endif
+
   return rv;
 }
 
@@ -120,7 +133,9 @@ uint32 EMU_CALL sega_get_state_size(uint8 version) {
   uint32 size = 0;
   if(version != 2) version = 1;
   size += sizeof(struct SEGA_STATE);
+#ifndef DISABLE_SSF
   if(version == 1) size += satsound_get_state_size();
+#endif
   if(version == 2) size += dcsound_get_state_size();
   return size;
 }
@@ -138,12 +153,16 @@ void EMU_CALL sega_clear_state(void *state, uint8 version) {
   memset(state, 0, sizeof(struct SEGA_STATE));
   // Set up offsets
   offset = sizeof(struct SEGA_STATE);
+#ifndef DISABLE_SSF
   if(version == 1) { SEGASTATE->offset_to_satsound = offset; offset += satsound_get_state_size(); }
+#endif
   if(version == 2) { SEGASTATE->offset_to_dcsound  = offset; offset += dcsound_get_state_size(); }
   //
   // Take care of substructures
   //
+#ifndef DISABLE_SSF
   if(HAVE_SATSOUND) satsound_clear_state(SATSOUNDSTATE);
+#endif
   if(HAVE_DCSOUND) dcsound_clear_state(DCSOUNDSTATE);
   // Done
 }
@@ -153,8 +172,12 @@ void EMU_CALL sega_clear_state(void *state, uint8 version) {
 // Obtain substates
 //
 void* EMU_CALL sega_get_satsound_state(void *state) {
+#ifdef DISABLE_SSF
+  return NULL;
+#else
   if(!(HAVE_SATSOUND)) return NULL;
   return SATSOUNDSTATE;
+#endif
 }
 
 void* EMU_CALL sega_get_dcsound_state(void *state) {
@@ -181,9 +204,12 @@ sint32 EMU_CALL sega_execute(
   sint16 *sound_buf,
   uint32 *sound_samples
 ) {
+#ifndef DISABLE_SSF
   if(HAVE_SATSOUND) {
     return satsound_execute(SATSOUNDSTATE, cycles, sound_buf, sound_samples);
-  } else if(HAVE_DCSOUND) {
+  } else
+#endif
+  if(HAVE_DCSOUND) {
     return dcsound_execute(DCSOUNDSTATE, cycles, sound_buf, sound_samples);
   } else {
     return -1;
@@ -217,9 +243,12 @@ sint32 EMU_CALL sega_upload_program(void *state, void *program, uint32 size) {
   uint32 start;
   if(size < 5) return -1;
   start = get32lsb((uint8*)program);
+#ifndef DISABLE_SSF
   if(HAVE_SATSOUND) {
     satsound_upload_to_ram(SATSOUNDSTATE, start, ((uint8*)program) + 4, size - 4);
-  } else if(HAVE_DCSOUND) {
+  } else
+#endif
+  if(HAVE_DCSOUND) {
     dcsound_upload_to_ram(DCSOUNDSTATE, start, ((uint8*)program) + 4, size - 4);
   } else {
     return -1;
@@ -232,7 +261,9 @@ sint32 EMU_CALL sega_upload_program(void *state, void *program, uint32 size) {
 // Get the current program counter
 //
 uint32 EMU_CALL sega_get_pc(void *state) {
+#ifndef DISABLE_SSF
   if(HAVE_SATSOUND) return satsound_get_pc(SATSOUNDSTATE);
+#endif
   if(HAVE_DCSOUND) return dcsound_get_pc(DCSOUNDSTATE);
   return 0;
 }
@@ -241,7 +272,9 @@ uint32 EMU_CALL sega_get_pc(void *state) {
 
 static void *getyamstate(struct SEGA_STATE *state) {
   void *yamstate = NULL;
+#ifndef DISABLE_SSF
   if(HAVE_SATSOUND) { yamstate = satsound_get_yam_state(SATSOUNDSTATE); }
+#endif
   if(HAVE_DCSOUND) { yamstate = dcsound_get_yam_state(DCSOUNDSTATE); }
   return yamstate;
 }

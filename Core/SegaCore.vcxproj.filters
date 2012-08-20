@@ -9,6 +9,9 @@
       <UniqueIdentifier>{61a513d4-d05c-48e9-9199-903526c7098a}</UniqueIdentifier>
       <Extensions>cpp;c;cxx;rc;def;r;odl;idl;hpj;bat</Extensions>
     </Filter>
+    <Filter Include="C68K">
+      <UniqueIdentifier>{f00dacbe-f20a-49f6-9151-c41e4ce2752b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="arm.c">
@@ -25,6 +28,12 @@
     </ClCompile>
     <ClCompile Include="yam.c">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="c68k\c68kexec.c">
+      <Filter>C68K</Filter>
+    </ClCompile>
+    <ClCompile Include="c68k\c68k.c">
+      <Filter>C68K</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -46,8 +55,70 @@
     <ClInclude Include="..\..\emuconfig.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="c68k\c68k.h">
+      <Filter>C68K</Filter>
+    </ClInclude>
+    <ClInclude Include="c68k\core.h">
+      <Filter>C68K</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Object Include="Starscream\s68000.obj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="c68k\c68k_ini.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op0.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op1.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op2.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op3.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op4.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op5.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op6.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op7.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op8.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_op9.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_opA.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_opB.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_opC.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_opD.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_opE.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68k_opF.inc">
+      <Filter>C68K</Filter>
+    </None>
+    <None Include="c68k\c68kmac.inc">
+      <Filter>C68K</Filter>
+    </None>
   </ItemGroup>
 </Project>
