@@ -96,6 +96,7 @@ static sint32 qtable[32] = {
 0x1C00,0x1D00,0x1E00,0x1F00
 };
 
+// Lifted from MAME/etc cores by kode54, in an attempt to fix some stuff
 static const float SDLT_AICA[16]={-1000000.0,-42.0,-39.0,-36.0,-33.0,-30.0,-27.0,-24.0,-21.0,-18.0,-15.0,-12.0,-9.0,-6.0,-3.0,0.0};
 static const float SDLT_SCSP[8]={-1000000.0,-36.0,-30.0,-24.0,-18.0,-12.0,-6.0,0.0};
 
