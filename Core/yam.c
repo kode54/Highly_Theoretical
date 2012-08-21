@@ -2758,16 +2758,16 @@ static void dynacompile(struct YAM_STATE *state) {
       } else { // saturate
         if((mpro->m_wrAFyyYh & 1) == 0) { // NOT shifting left
           C(0x8D) C(0x96) C32(0x00800000)         // lea edx,[esi+800000h]
-          C(0x81) C(0xFA) C32(0xFF000000)         // cmp edx,0FF000000h
+          C(0xF7) C(0xC2) C32(0xFF000000)         // test edx,0FF000000h
           C(0x89) C(0xF2)                         // mov edx,esi
           // 14 bytes max
         } else { // shifting left
           C(0x8D) C(0x94) C(0x36) C32(0x00800000) // lea edx,[esi+esi+800000h]
-          C(0x81) C(0xFA) C32(0xFF000000)         // cmp edx,0FF000000h
+          C(0xF7) C(0xC2) C32(0xFF000000)         // test edx,0FF000000h
           C(0x8D) C(0x14) C(0x36)                 // lea edx,[esi+esi]
           // 16 bytes max
         }
-        C(0x72) C(0x09)                 // jb +9bytes
+        C(0x74) C(0x09)                 // je +9bytes
         C(0xC1) C(0xFA) C(0x1F)         // sar edx,1Fh
         C(0x81) C(0xF2) C32(0x007FFFFF) // xor edx,7FFFFFh
         // 27 bytes max
