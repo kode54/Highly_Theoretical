@@ -19,17 +19,15 @@
 
 /////////////////////////////////////////////////////////////////////////////
 
-#ifdef DISABLE_SSF
 #define RENDERMAX (200)
-#else
-#define RENDERMAX (1) // (200)
-#endif
+#define RINGMAX   (512) // should be nearest power of two that's at least 64 greater than RENDERMAX
 
 /////////////////////////////////////////////////////////////////////////////
 
 #define INT_ONE_SAMPLE  (10)
 #define INT_MIDI_OUTPUT (9)
-#define INT_TIMER_BC    (7)
+#define INT_TIMER_C     (8)
+#define INT_TIMER_B     (7)
 #define INT_TIMER_A     (6)
 #define INT_CPU         (5)
 #define INT_DMA_END     (4)
@@ -514,7 +512,7 @@ struct YAM_STATE {
   sint32 mem_in_data[4];
 
   // SCSP modulation data
-  sint16 ringbuf[64];
+  sint16 ringbuf[32*RINGMAX];
   uint32 bufptr;
   // DMA registers
   uint32 dmea;
@@ -685,9 +683,10 @@ void EMU_CALL yam_enable_dsp_dynarec(void *state, uint8 enable) {
 //
 static void sci_recompute(struct YAM_STATE *state) {
   int i;
+  uint16 scipd = (state->scipd) & (state->scieb);
   state->inton = 0;
   for(i = 10; i >= 0; i--) {
-    if(((state->scipd) >> i) & 1) {
+    if(((scipd) >> i) & 1) {
       if(i > 7) i = 7;
       state->intreq =
         ((((state->scilv0) >> i) & 1) << 0) |
@@ -703,7 +702,7 @@ static void sci_recompute(struct YAM_STATE *state) {
 // Signal an interrupt
 //
 static void sci_signal(struct YAM_STATE *state, int n) {
-  state->scipd |= ((1 << n) & (state->scieb));
+  state->scipd |= (1 << n);
   if(!(state->inton)) {
     sci_recompute(state);
   }
@@ -723,7 +722,7 @@ uint32 EMU_CALL yam_get_min_samples_until_interrupt(void *state) {
 //return 1;
 
   for(t = 0; t < 3; t++) {
-    if(YAMSTATE->scieb & (1 << (t ? INT_TIMER_BC : INT_TIMER_A))) {
+    if(YAMSTATE->scieb & (1 << (INT_TIMER_A + t))) {
       samples = 0x100-((uint32)(YAMSTATE->tim[t]));
       samples <<= YAMSTATE->tctl[t];
       samples -= (YAMSTATE->odometer) & ((1<<YAMSTATE->tctl[t])-1);
@@ -748,7 +747,7 @@ void EMU_CALL yam_advance(void *state, uint32 samples) {
     uint32 whole = YAMSTATE->tim[t];
     uint32 frac = (YAMSTATE->odometer) & ((1<<scale)-1);
     uint32 remain = ((0x100 - whole) << scale) - frac;
-    if(samples >= remain) { sci_signal(state, t ? INT_TIMER_BC : INT_TIMER_A); }
+    if(samples >= remain) { sci_signal(state, INT_TIMER_A + t); }
     YAMSTATE->tim[t] = ((frac + samples + (whole << scale)) >> scale) & 0xFF;
   }
   YAMSTATE->out_pending += samples;
@@ -1510,12 +1509,19 @@ static void dsp_aica_store_reg(
 //
 // Externally-accessible load/store register
 //
+
+#if defined(SCSP_LOG) && !defined(USE_STARSCREAM)
+#include <stdio.h>
+  extern FILE * scsp_log;
+  extern unsigned char ** scsp_pc, ** scsp_basepc;
+#endif
+
 uint32 EMU_CALL yam_scsp_load_reg(void *state, uint32 a, uint32 mask) {
   uint32 d = 0;
   a &= 0xFFE;
   if(a <  0x400) return chan_scsp_load_reg(YAMSTATE, a>>5, a&0x1E) & mask;
   if(a >= 0x700) return dsp_scsp_load_reg(YAMSTATE, a) & mask;
-  if(a >= 0x600) return YAMSTATE->ringbuf[(a-0x600)/2] & mask;
+  if(a >= 0x600) return YAMSTATE->ringbuf[YAMSTATE->bufptr+(a-0x600)/2] & mask;
   switch(a) {
   case 0x400: d = 0x0010; break; // MasterVolume (actually returns the LSI version)
   case 0x402: // RingBufferAddress
@@ -1660,25 +1666,22 @@ uint32 EMU_CALL yam_scsp_load_reg(void *state, uint32 a, uint32 mask) {
   case 0x42A: d = YAMSTATE->mcieb & 0x07FF; break;
   case 0x42C: d = YAMSTATE->mcipd & 0x07FF; break;
   }
+#if defined(SCSP_LOG) && !defined(USE_STARSCREAM)
+  fprintf(scsp_log, "%u - %08x r: %04x, %04x\n", YAMSTATE->odometer, (int)(*scsp_pc - *scsp_basepc), a, d);
+#endif
   return d & mask;
 }
-
-#if 0
-#include <stdio.h>
-extern FILE * scsp_log;
-extern unsigned char ** scsp_pc, ** scsp_basepc;
-#endif
 
 void EMU_CALL yam_scsp_store_reg(void *state, uint32 a, uint32 d, uint32 mask, uint8 *breakcpu) {
   a &= 0xFFE;
   d &= 0xFFFF & mask;
-#if 0
-  fprintf(scsp_log, "%08x: %04x, %04x\n", (int)(*scsp_pc - *scsp_basepc), a, d);
+#if defined(SCSP_LOG) && !defined(USE_STARSCREAM)
+  fprintf(scsp_log, "%u - %08x w: %04x, %04x\n", YAMSTATE->odometer, (int)(*scsp_pc - *scsp_basepc), a, d);
 #endif
   mask &= 0xFFFF;
   if(a <  0x400) { chan_scsp_store_reg(YAMSTATE, a>>5, a&0x1E, d, mask); return; }
   if(a >= 0x700) { dsp_scsp_store_reg(YAMSTATE, a, d, mask); return; }
-  if(a >= 0x600) { YAMSTATE->ringbuf[(a-0x600)/2] = (d & mask) | (YAMSTATE->ringbuf[(a-0x600)/2] & ~mask); return; }
+  if(a >= 0x600) { YAMSTATE->ringbuf[YAMSTATE->bufptr+(a-0x600)/2] = (d & mask) | (YAMSTATE->ringbuf[YAMSTATE->bufptr+(a-0x600)/2] & ~mask); return; }
   switch(a) {
   case 0x400: // MasterVolume
     yam_flush(YAMSTATE);
@@ -2073,7 +2076,7 @@ static void readnextsample(
   //
   playpos = chan->playpos;
   if(chan->mdl && chan->mdxsl && chan->mdysl) {
-    sint32 smp = (state->ringbuf[(state->bufptr + chan->mdxsl)&63] + state->ringbuf[(state->bufptr + chan->mdysl)&63]) / 2;
+    sint32 smp = (state->ringbuf[(state->bufptr - 64 + chan->mdxsl)&(32*RINGMAX-1)] + state->ringbuf[(state->bufptr - 64 + chan->mdysl)&(32*RINGMAX-1)]) / 2;
 
     smp <<= 0x0A;
     smp >>= 0x1A - chan->mdl;
@@ -2162,6 +2165,9 @@ static uint32 generate_samples(
   uint32 g;
   uint32 base_phaseinc;
   uint32 lfophaseinc = lfophaseinctable[chan->lfof];
+  uint32 bufptrsave = state->bufptr;
+  uint32 mdlsrc = state->version == 1 && !chan->stwinh;
+  sint32 vol_l, vol_r;
 
 //gfreq[samples]++;
 
@@ -2174,6 +2180,13 @@ static uint32 generate_samples(
     if(chan->pcms == 2 && oct >= 0xA) { base_phaseinc <<= 1; }
   }
 
+  convert_stereo_send_level(
+    chan->tl,
+    0x7,
+    0x0,
+    &vol_l, &vol_r,
+    1
+  );
   for(g = 0; g < samples; g++) {
 //buf[g]=g*100;continue;
     //
@@ -2240,6 +2253,13 @@ static uint32 generate_samples(
       }
       // Write output
       buf[g] = s;
+
+      if(mdlsrc) {
+        sint32 sample = (s * vol_l) >> SHIFT;
+        if ((sint16)sample != sample) sample = 0x8000 ^ (sample >> 31);
+        state->ringbuf[state->bufptr] = (sint16)sample;
+        state->bufptr = (state->bufptr + 32) & (32*RINGMAX-1);
+      }
     }
     //
     // Now we need to advance the channel state machine, regardless of
@@ -2335,6 +2355,7 @@ static uint32 generate_samples(
     odometer++;
     // Done with this sample!
   }
+  state->bufptr = bufptrsave;
   return g;
 }
 
@@ -2370,22 +2391,6 @@ static void render_and_add_channel(
     odometer,
     samples
   );
-
-  if (state->version == 1 && !chan->stwinh) {
-    sint32 vol_l, vol_r;
-    convert_stereo_send_level(
-      chan->tl,
-      0x7,
-      0x0,
-      &vol_l, &vol_r,
-      1
-    );
-    for (i = 0; i < rendersamples; i++) {
-      sint32 sample = (localbuf[i] * vol_l) >> SHIFT;
-      if ((sint16)sample != sample) sample = 0x8000 ^ (sample >> 31);
-      state->ringbuf[(state->bufptr + i*32)&63] = (sint16)sample;
-    }
-  }
 
   // Add to output
   if(directout) {
@@ -3040,8 +3045,9 @@ fclose(f);
       wantreverb ? (fxbus + chan->dspchan) : NULL,
       odometer, samples
     );
-    state->bufptr++;
+    state->bufptr = (state->bufptr + 1) & (32*RINGMAX-1);
   }
+  state->bufptr = (state->bufptr + (32*(samples-1))) & (32*RINGMAX-1);
   //
   // Emulate DSP effects if desired
   //

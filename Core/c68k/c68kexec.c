@@ -159,7 +159,7 @@ void TRACE(int PC,c68k_struc *CPU,int Opcode,int CCnt) {
 // main exec function
 //////////////////////
 
-#if 0
+#if 1
 extern unsigned char ** scsp_pc;
 #endif
 
@@ -187,7 +187,7 @@ s32 FASTCALL C68k_Exec(c68k_struc *cpu, s32 cycle)
 #endif
 #endif
 
-#if 0
+#if 1
 	scsp_pc = &PC;
 #endif
 

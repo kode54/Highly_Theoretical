@@ -504,7 +504,7 @@ static uint32 cycles_until_next_interrupt(struct SATSOUND_STATE *state) {
 //        or LESS than the number requested
 // <= -1  Unrecoverable error
 //
-#if 0
+#if defined(SCSP_LOG) && !defined(USE_STARSCREAM)
 unsigned char ** scsp_pc;
 unsigned char ** scsp_basepc;
 #endif
@@ -568,7 +568,7 @@ sint32 EMU_CALL satsound_execute(
 //    SATSOUNDSTATE->scpu_is_executing = 1;
 //  }
 
-#if 0
+#if defined(SCSP_LOG) && !defined(USE_STARSCREAM)
   scsp_pc = &(SCPUSTATE->PC);
   scsp_basepc = &(SCPUSTATE->BasePC);
 #endif
