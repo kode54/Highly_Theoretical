@@ -12,6 +12,9 @@
     <Filter Include="C68K">
       <UniqueIdentifier>{f00dacbe-f20a-49f6-9151-c41e4ce2752b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="m68k">
+      <UniqueIdentifier>{b62210c8-e7eb-4724-be9b-f7e5509f30df}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="arm.c">
@@ -34,6 +37,9 @@
     </ClCompile>
     <ClCompile Include="c68k\c68k.c">
       <Filter>C68K</Filter>
+    </ClCompile>
+    <ClCompile Include="m68k\m68kcpu.c">
+      <Filter>m68k</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -60,6 +66,27 @@
     </ClInclude>
     <ClInclude Include="c68k\core.h">
       <Filter>C68K</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\m68k.h">
+      <Filter>m68k</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\m68kconf.h">
+      <Filter>m68k</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\m68kcpu.h">
+      <Filter>m68k</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\m68ki_cycles.h">
+      <Filter>m68k</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\m68ki_instruction_jump_table.h">
+      <Filter>m68k</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\m68kops.h">
+      <Filter>m68k</Filter>
+    </ClInclude>
+    <ClInclude Include="m68k\macros.h">
+      <Filter>m68k</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -119,6 +146,9 @@
     </None>
     <None Include="c68k\c68kmac.inc">
       <Filter>C68K</Filter>
+    </None>
+    <None Include="m68k\readme.txt">
+      <Filter>m68k</Filter>
     </None>
   </ItemGroup>
 </Project>
