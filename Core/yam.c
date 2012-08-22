@@ -97,6 +97,19 @@ static sint32 qtable[32] = {
 };
 
 // Lifted from MAME/etc cores by kode54, in an attempt to fix some stuff
+//Envelope times in ms
+static const double ARTimes[64]={100000/*infinity*/,100000/*infinity*/,8100.0,6900.0,6000.0,4800.0,4000.0,3400.0,3000.0,2400.0,2000.0,1700.0,1500.0,
+  1200.0,1000.0,860.0,760.0,600.0,500.0,430.0,380.0,300.0,250.0,220.0,190.0,150.0,130.0,110.0,95.0,
+  76.0,63.0,55.0,47.0,38.0,31.0,27.0,24.0,19.0,15.0,13.0,12.0,9.4,7.9,6.8,6.0,4.7,3.8,3.4,3.0,2.4,
+  2.0,1.8,1.6,1.3,1.1,0.93,0.85,0.65,0.53,0.44,0.40,0.35,0.0,0.0};
+static const double DRTimes[64]={100000/*infinity*/,100000/*infinity*/,118200.0,101300.0,88600.0,70900.0,59100.0,50700.0,44300.0,35500.0,29600.0,25300.0,22200.0,17700.0,
+  14800.0,12700.0,11100.0,8900.0,7400.0,6300.0,5500.0,4400.0,3700.0,3200.0,2800.0,2200.0,1800.0,1600.0,1400.0,1100.0,
+  920.0,790.0,690.0,550.0,460.0,390.0,340.0,270.0,230.0,200.0,170.0,140.0,110.0,98.0,85.0,68.0,57.0,49.0,43.0,34.0,
+  28.0,25.0,22.0,18.0,14.0,12.0,11.0,8.5,7.1,6.1,5.4,4.3,3.6,3.1};
+static sint32 EG_TABLE[0x400];
+static int ARTABLE[64];
+static int DRTABLE[64];
+
 static const float SDLT_AICA[16]={-1000000.0,-42.0,-39.0,-36.0,-33.0,-30.0,-27.0,-24.0,-21.0,-18.0,-15.0,-12.0,-9.0,-6.0,-3.0,0.0};
 static const float SDLT_SCSP[8]={-1000000.0,-36.0,-30.0,-24.0,-18.0,-12.0,-6.0,0.0};
 
@@ -106,12 +119,20 @@ static sint32 RPANTABLE_SCSP[0x10000];
 static sint32 LPANTABLE_AICA[0x20000];
 static sint32 RPANTABLE_AICA[0x20000];
 
+#define EG_SHIFT  16
 #define SHIFT   10
 #define FIX(v)  ((sint32) ((float) (1<<SHIFT)*(v)))
 
-static void yam_init_pan_tables()
+static void yam_init_tables()
 {
-  uint32 i;
+  sint32 i;
+
+  for(i=0;i<0x400;++i) {
+    float envDB=((float)(3*(i-0x3ff)))/32.0;
+    float scale=(float)(1<<SHIFT);
+    EG_TABLE[i]=(sint32)(pow(10.0,envDB/20.0)*scale);
+  }
+
   for(i=0;i<0x10000;++i) {
     int iTL =(i>>0x0)&0xff;
     int iPAN=(i>>0x8)&0x1f;
@@ -211,6 +232,25 @@ static void yam_init_pan_tables()
     LPANTABLE_AICA[i]=FIX((4.0*LPAN*TL*fSDL));
     RPANTABLE_AICA[i]=FIX((4.0*RPAN*TL*fSDL));
   }
+
+  ARTABLE[0]=DRTABLE[0]=0;  //Infinite time
+  ARTABLE[1]=DRTABLE[1]=0;  //Infinite time
+  for(i=2;i<64;++i) {
+    double t,step,scale;
+    t=ARTimes[i];  //In ms
+    if(t!=0.0) {
+      step=(1023*1000.0)/((float) 44100.0f*t);
+      scale=(double) (1<<EG_SHIFT);
+      ARTABLE[i]=(int) (step*scale);
+    }
+    else
+      ARTABLE[i]=1024<<EG_SHIFT;
+
+    t=DRTimes[i];  //In ms
+    step=(1023*1000.0)/((float) 44100.0f*t);
+    scale=(double) (1<<EG_SHIFT);
+    DRTABLE[i]=(int) (step*scale);
+  }
 }
 
 static void convert_stereo_send_level(
@@ -232,7 +272,7 @@ static void convert_stereo_send_level(
 /////////////////////////////////////////////////////////////////////////////
 
 sint32 EMU_CALL yam_init(void) {
-  yam_init_pan_tables();
+  yam_init_tables();
   return 0;
 }
 
@@ -264,6 +304,23 @@ void yam_debugoutput(void) {
 #define LOOP_BACKWARDS     (2)
 #define LOOP_BIDIRECTIONAL (3)
 
+typedef enum {ATTACK,DECAY1,DECAY2,RELEASE} _STATE;
+struct _EG
+{
+  int volume;  //
+  _STATE state;
+  int step;
+  //step vals
+  int AR;    //Attack
+  int D1R;   //Decay1
+  int D2R;   //Decay2
+  int RR;    //Release
+
+  int DL;    //Decay level
+  uint8 EGHOLD;
+  uint8 LPLINK;
+};
+
 struct YAM_CHAN {
   uint8 kyonb;
   uint8 ssctl;
@@ -274,10 +331,12 @@ struct YAM_CHAN {
   uint32 sampleaddr;
   sint32 loopstart;
   sint32 loopend;
+  struct _EG EG;
   uint8 ar[4]; // amplitude envelope rate: attack, decay, sustain, release
   uint8 dl;
   uint8 krs;
   uint8 link;
+  uint8 eghold;
   uint8 oct;
   uint16 fns;
   uint8 lfore;
@@ -300,13 +359,11 @@ struct YAM_CHAN {
   uint8 mdysl;
   uint16 flv[5];
   uint8 fr[4]; // filter envelope rate: attack, decay, sustain, release
-  uint16 envlevelmask[4]; // for EGHOLD, the first will be 0
-  uint16 envlevel;
   uint16 lpflevel;
-  uint8 envstate;
   uint8 lpfstate;
   uint8 lp;
   uint32 playpos;
+  sint32 playpos_offset; // used for modulation
   uint32 frcphase;
   uint32 lfophase;
   sint32 samplebufcur; // these are 16-bit signed
@@ -548,13 +605,9 @@ void EMU_CALL yam_clear_state(void *state, uint8 version) {
   YAMSTATE->version = version;
   // Clear channel regs
   for(i = 0; i < 64; i++) {
-    YAMSTATE->chan[i].envstate = 3;
+    YAMSTATE->chan[i].EG.state = RELEASE;
     YAMSTATE->chan[i].lpfstate = 3;
-    YAMSTATE->chan[i].envlevel = 0x1FFF;
-    YAMSTATE->chan[i].envlevelmask[0] = 0x1FFF;
-    YAMSTATE->chan[i].envlevelmask[1] = 0x1FFF;
-    YAMSTATE->chan[i].envlevelmask[2] = 0x1FFF;
-    YAMSTATE->chan[i].envlevelmask[3] = 0x1FFF;
+    YAMSTATE->chan[i].eghold = 0;
     YAMSTATE->chan[i].lpflevel = 0x1FFF;
     // no lowpass on the SCSP
     if(version == 1) { YAMSTATE->chan[i].lpoff = 1; }
@@ -757,17 +810,107 @@ void EMU_CALL yam_advance(void *state, uint32 samples) {
 
 /////////////////////////////////////////////////////////////////////////////
 //
+// Envelope calculation
+//
+static int Get_AR(int base,int R)
+{
+  int Rate=base+(R<<1);
+  if(Rate>63) Rate=63;
+  if(Rate<0) Rate=0;
+  return ARTABLE[Rate];
+}
+
+static int Get_DR(int base,int R)
+{
+  int Rate=base+(R<<1);
+  if(Rate>63) Rate=63;
+  if(Rate<0) Rate=0;
+  return DRTABLE[Rate];
+}
+
+static int Get_RR(int base,int R)
+{
+  int Rate=base+(R<<1);
+  if(Rate>63) Rate=63;
+  if(Rate<0) Rate=0;
+  return DRTABLE[Rate];
+}
+
+static void Compute_EG(struct YAM_CHAN *chan)
+{
+  int octave=chan->oct;
+  int rate;
+  if(octave&8) octave=octave-16;
+  if(chan->krs!=0xf)
+    rate=octave+2*chan->krs+((chan->fns>>9)&1);
+  else
+    rate=0; //rate=((FNS(slot)>>9)&1);
+
+  chan->EG.volume=0x17F<<EG_SHIFT;
+  chan->EG.AR=Get_AR(rate,chan->ar[0]);
+  chan->EG.D1R=Get_DR(rate,chan->ar[1]);
+  chan->EG.D2R=Get_DR(rate,chan->ar[2]);
+  chan->EG.RR=Get_RR(rate,chan->ar[3]);
+  chan->EG.DL=0x1f-chan->dl;
+  chan->EG.EGHOLD=chan->eghold;
+}
+
+static void keyoff(struct YAM_CHAN *chan);
+
+static int EG_Update(struct YAM_CHAN *chan)
+{
+  switch(chan->EG.state) {
+    case ATTACK:
+      chan->EG.volume+=chan->EG.AR;
+      if(chan->EG.volume>=(0x3ff<<EG_SHIFT)) {
+        if (!chan->link) {
+          chan->EG.state=DECAY1;
+          if(chan->EG.D1R>=(1024<<EG_SHIFT)) //Skip DECAY1, go directly to DECAY2
+            chan->EG.state=DECAY2;
+        }
+        chan->EG.volume=0x3ff<<EG_SHIFT;
+      }
+      if(chan->EG.EGHOLD)
+        return 0x3ff<<(SHIFT-10);
+      break;
+    case DECAY1:
+      chan->EG.volume-=chan->EG.D1R;
+      if(chan->EG.volume<=0)
+        chan->EG.volume=0;
+      if(chan->EG.volume>>(EG_SHIFT+5)<=chan->EG.DL)
+        chan->EG.state=DECAY2;
+      break;
+    case DECAY2:
+      if(chan->ar[2]==0)
+        return (chan->EG.volume>>EG_SHIFT)<<(SHIFT-10);
+      chan->EG.volume-=chan->EG.D2R;
+      if(chan->EG.volume<=0)
+        chan->EG.volume=0;
+      break;
+    case RELEASE:
+      chan->EG.volume-=chan->EG.RR;
+      if(chan->EG.volume<=0) {
+        chan->EG.volume=0;
+        keyoff(chan);
+      }
+      break;
+    default:
+      return 1<<SHIFT;
+  }
+  return (chan->EG.volume>>EG_SHIFT)<<(SHIFT-10);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//
 // Key on/off
 //
 static void keyon(struct YAM_CHAN *chan) {
 //printf("keyon %08X\n",chan);
   // Ignore redundant key-ons
-  if(chan->envstate != 3) return;
+  if(chan->EG.state != RELEASE) return;
   chan->sampler_dir = 1;
   chan->playpos = 0;
-  chan->envlevel = 0x280;
   chan->lpflevel = chan->flv[0];
-  chan->envstate = 0;
   chan->lpfstate = 0;
   chan->adpcmstep = 0x7F;
   chan->adpcmstep_loopstart = 0;
@@ -776,11 +919,14 @@ static void keyon(struct YAM_CHAN *chan) {
   chan->adpcminloop = 0;
   chan->samplebufcur = 0;
   chan->samplebufnext = 0;
+  Compute_EG(chan);
+  chan->EG.state=ATTACK;
+  chan->EG.volume=0x17F<<EG_SHIFT;
 //printf("keyon %08X passed\n",chan);
 }
 
 static void keyoff(struct YAM_CHAN *chan) {
-  chan->envstate = 3;
+  chan->EG.state = RELEASE;
   chan->lpfstate = 3;
 }
 
@@ -897,7 +1043,7 @@ static uint32 chan_scsp_load_reg(struct YAM_STATE *state, uint8 ch, uint8 a) {
   case 0x08: // AmpEnv1
     d  =  (((uint32)(chan->ar[2]          )) & 0x001F) << 11;
     d |=  (((uint32)(chan->ar[1]          )) & 0x001F) <<  6;
-    d |= ((((uint32)(chan->envlevelmask[0])) & 1) ^ 1) <<  5;
+    d |=  (((uint32)(chan->eghold         )) & 1)      <<  5;
     d |=  (((uint32)(chan->ar[0]          )) & 0x001F) <<  0;
     break;
   case 0x0A: // AmpEnv2
@@ -999,7 +1145,7 @@ static void chan_scsp_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
   case 0x08: // AmpEnv1
     if(mask & 0x00FF) {
       chan->ar[0] = d & 0x1F;
-      chan->envlevelmask[0] = (d & (1<<5)) ? 0x0000 : 0x1FFF;
+      chan->eghold = !!(d & (1<<5));
 //      chan->envlevelmask[0] = 0x1FFF;
       chan->ar[1] &= 0x1C;
       chan->ar[1] |= (d >> 6) & 0x03;
@@ -1806,8 +1952,8 @@ uint32 EMU_CALL yam_aica_load_reg(void *state, uint32 a, uint32 mask) {
     { int c = (YAMSTATE->mslc) & 0x3F;
       d  = (((uint32)(YAMSTATE->chan[c].lp      )) & 1) << 15;
       if(YAMSTATE->afsel == 0) {
-        d |= (((uint32)(YAMSTATE->chan[c].envstate)) & 3) << 13;
-        d |= (YAMSTATE->chan[c].envlevel) & 0x1FFF;
+        d |= (((uint32)(YAMSTATE->chan[c].EG.state)) & 3) << 13;
+        d |= (~YAMSTATE->chan[c].EG.volume >> (EG_SHIFT-3)) & 0x1FFF;
       } else {
         d |= (((uint32)(YAMSTATE->chan[c].lpfstate)) & 3) << 13;
         d |= (YAMSTATE->chan[c].lpflevel) & 0x1FFF;
@@ -1991,7 +2137,7 @@ static uint32 yamrand16(struct YAM_STATE *state) {
 
 /////////////////////////////////////////////////////////////////////////////
 //
-// Envelope-related calculations
+// (original) Envelope-related calculations
 //
 
 //
@@ -2049,7 +2195,7 @@ static void readnextsample(
   // Process envelope link and lowpass phase reset
   //
   if(chan->playpos == chan->loopstart) {
-    if(chan->link && chan->envstate == 0) { chan->envstate = 1; }
+    if(chan->link && chan->EG.state == ATTACK) { chan->EG.state = DECAY1; }
     if(chan->lfore) chan->lfophase = 0;
     // and save adpcm loop-start values
     if(!(chan->adpcminloop)) {
@@ -2075,15 +2221,7 @@ static void readnextsample(
   //
   // Obtain sample
   //
-  playpos = chan->playpos;
-  if(chan->mdl && chan->mdxsl && chan->mdysl) {
-    sint32 smp = (state->ringbuf[(state->bufptr - 64 + chan->mdxsl)&(32*RINGMAX-1)] + state->ringbuf[(state->bufptr - 64 + chan->mdysl)&(32*RINGMAX-1)]) / 2;
-
-    smp <<= 0x0A;
-    smp >>= 0x1A - chan->mdl;
-
-    playpos += smp;
-  }
+  playpos = chan->playpos + chan->playpos_offset;
   switch(chan->pcms) {
   case 0: // 16-bit signed LSB-first
     s = *(sint16*)(((sint8*)(state->ram_ptr)) + (((chan->sampleaddr + 2 * playpos) ^ (state->mem_word_address_xor))  & (state->ram_mask)));
@@ -2193,8 +2331,7 @@ static uint32 generate_samples(
     //
     // If the amp envelope is inactive, quit
     //
-    if(chan->envlevel >= 0x3C0) {
-      chan->envlevel = 0x1FFF;
+    if(chan->EG.volume <= 0) {
       break;
     }
     //
@@ -2212,7 +2349,7 @@ static uint32 generate_samples(
       if(!(chan->voff)) {
         uint32 attenuation;
         sint32 linearvol;
-        attenuation = ((uint32)(chan->envlevel)) & ((uint32)(chan->envlevelmask[chan->envstate]));
+        attenuation = 0;
         // LFO amplitude modulation
         if(chan->alfos) {
           uint32 att_wave_y = 0;
@@ -2240,6 +2377,11 @@ static uint32 generate_samples(
           linearvol = ((attenuation & 0x3F) ^ 0x7F) + 1;
           s *= linearvol; s >>= 7 + (attenuation >> 6);
         }
+        // Apply MAME envelope generator
+        if(chan->EG.state==ATTACK)
+          s=(s*EG_Update(chan))>>SHIFT;
+        else
+          s=(s*EG_TABLE[EG_Update(chan)>>(SHIFT-10)])>>SHIFT;
       }
       // Apply filter, if we want it
       if(!(chan->lpoff)) {
@@ -2270,27 +2412,6 @@ static uint32 generate_samples(
     // Advance LFO phase
     //
     chan->lfophase += lfophaseinc;
-    //
-    // Advance amplitude envelope
-    //
-    { uint32 effectiverate = env_adjustrate(chan, chan->ar[chan->envstate]);
-      if(env_needstep(effectiverate, odometer)) {
-        switch(chan->envstate) {
-        case 0: // attack
-          chan->envlevel -= (chan->envlevel >> envattackshift[effectiverate][odometer&3]) + 1;
-          if(chan->envlevel == 0) { chan->envstate = 1; }
-          break;
-        case 1: // decay
-          chan->envlevel += envdecayvalue[effectiverate][odometer&3];
-          if((chan->envlevel >> 5) >= chan->dl) { chan->envstate = 2; }
-          break;
-        case 2: // sustain
-        case 3: // release
-          chan->envlevel += envdecayvalue[effectiverate][odometer&3];
-          break;
-        }
-      }
-    }
     //
     // Advance filter envelope
     //
@@ -2344,6 +2465,18 @@ static uint32 generate_samples(
         }
       }
       //
+      // Calculate modulation offset for next sample(s) decoded
+      //
+      chan->playpos_offset = 0;
+      if(chan->mdl && chan->mdxsl && chan->mdysl) {
+        sint32 smp = (state->ringbuf[(state->bufptr - 64 + chan->mdxsl)&(32*RINGMAX-1)] + state->ringbuf[(state->bufptr - 64 + chan->mdysl)&(32*RINGMAX-1)]) / 2;
+
+        smp <<= 0x0A;
+        smp >>= 0x1A - chan->mdl;
+
+        chan->playpos_offset = smp;
+      }
+      //
       // Advance phase, and read new sample data if necessary
       //
       chan->frcphase += realphaseinc;
@@ -2379,7 +2512,7 @@ static void render_and_add_channel(
   uint32 rendersamples;
 
   // Channel does nothing if attenuation >= 0x3C0
-  if(chan->envlevel >= 0x3C0) { chan->envlevel = 0x1FFF; return; }
+  if(chan->EG.volume <= 0) { return; }
 
   if(!chan->disdl) { directout = NULL; }
   if(!chan->dsplevel) { fxout = NULL; }
