@@ -871,7 +871,11 @@ static int EG_Update(struct YAM_CHAN *chan)
         chan->EG.volume=0x3ff<<EG_SHIFT;
       }
       if(chan->EG.EGHOLD)
+#if SHIFT >= 10
         return 0x3ff<<(SHIFT-10);
+#else
+        return 0x3ff>>(10-SHIFT);
+#endif
       break;
     case DECAY1:
       chan->EG.volume-=chan->EG.D1R;
@@ -882,7 +886,11 @@ static int EG_Update(struct YAM_CHAN *chan)
       break;
     case DECAY2:
       if(chan->ar[2]==0)
+#if SHIFT >= 10
         return (chan->EG.volume>>EG_SHIFT)<<(SHIFT-10);
+#else
+        return (chan->EG.volume>>EG_SHIFT)>>(10-SHIFT);
+#endif
       chan->EG.volume-=chan->EG.D2R;
       if(chan->EG.volume<=0)
         chan->EG.volume=0;
@@ -897,7 +905,11 @@ static int EG_Update(struct YAM_CHAN *chan)
     default:
       return 1<<SHIFT;
   }
+#if SHIFT >= 10
   return (chan->EG.volume>>EG_SHIFT)<<(SHIFT-10);
+#else
+  return (chan->EG.volume>>EG_SHIFT)>>(10-SHIFT);
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1668,7 +1680,7 @@ uint32 EMU_CALL yam_scsp_load_reg(void *state, uint32 a, uint32 mask) {
   a &= 0xFFE;
   if(a <  0x400) return chan_scsp_load_reg(YAMSTATE, a>>5, a&0x1E) & mask;
   if(a >= 0x700) return dsp_scsp_load_reg(YAMSTATE, a) & mask;
-  if(a >= 0x600) return YAMSTATE->ringbuf[YAMSTATE->bufptr+(a-0x600)/2] & mask;
+  if(a >= 0x600) return YAMSTATE->ringbuf[(YAMSTATE->bufptr-64+(a-0x600)/2)&(32*RINGMAX-1)] & mask;
   switch(a) {
   case 0x400: d = 0x0010; break; // MasterVolume (actually returns the LSI version)
   case 0x402: // RingBufferAddress
@@ -1828,7 +1840,7 @@ void EMU_CALL yam_scsp_store_reg(void *state, uint32 a, uint32 d, uint32 mask, u
   mask &= 0xFFFF;
   if(a <  0x400) { chan_scsp_store_reg(YAMSTATE, a>>5, a&0x1E, d, mask); return; }
   if(a >= 0x700) { dsp_scsp_store_reg(YAMSTATE, a, d, mask); return; }
-  if(a >= 0x600) { YAMSTATE->ringbuf[YAMSTATE->bufptr+(a-0x600)/2] = (d & mask) | (YAMSTATE->ringbuf[YAMSTATE->bufptr+(a-0x600)/2] & ~mask); return; }
+  if(a >= 0x600) { uint32 offset = (YAMSTATE->bufptr-64+(a-0x600)/2)&(32*RINGMAX-1); YAMSTATE->ringbuf[offset] = (d & mask) | (YAMSTATE->ringbuf[offset] & ~mask); return; }
   switch(a) {
   case 0x400: // MasterVolume
     yam_flush(YAMSTATE);
@@ -2381,7 +2393,11 @@ static uint32 generate_samples(
         if(chan->EG.state==ATTACK)
           s=(s*EG_Update(chan))>>SHIFT;
         else
+#if SHIFT >= 10
           s=(s*EG_TABLE[EG_Update(chan)>>(SHIFT-10)])>>SHIFT;
+#else
+          s=(s*EG_TABLE[EG_Update(chan)<<(10-SHIFT)])>>SHIFT;
+#endif
       }
       // Apply filter, if we want it
       if(!(chan->lpoff)) {
@@ -2398,10 +2414,8 @@ static uint32 generate_samples(
       buf[g] = s;
 
       if(mdlsrc) {
-        sint32 sample = (s * vol_l) >> SHIFT;
-        if ((sint16)sample != sample) sample = 0x8000 ^ (sample >> 31);
+        sint32 sample = (s * vol_l) >> (SHIFT+1);
         state->ringbuf[state->bufptr] = (sint16)sample;
-        state->bufptr = (state->bufptr + 32) & (32*RINGMAX-1);
       }
     }
     //
@@ -2469,13 +2483,14 @@ static uint32 generate_samples(
       //
       chan->playpos_offset = 0;
       if(chan->mdl && chan->mdxsl && chan->mdysl) {
-        sint32 smp = (state->ringbuf[(state->bufptr - 64 + chan->mdxsl)&(32*RINGMAX-1)] + state->ringbuf[(state->bufptr - 64 + chan->mdysl)&(32*RINGMAX-1)]) / 2;
+        sint32 smp = ((sint32)(state->ringbuf[(state->bufptr - 64 + chan->mdxsl)&(32*RINGMAX-1)]) + (sint32)(state->ringbuf[(state->bufptr - 64 + chan->mdysl)&(32*RINGMAX-1)])) / 2;
 
         smp <<= 0x0A;
         smp >>= 0x1A - chan->mdl;
 
         chan->playpos_offset = smp;
       }
+      state->bufptr = (state->bufptr + 32) & (32*RINGMAX-1);
       //
       // Advance phase, and read new sample data if necessary
       //
