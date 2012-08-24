@@ -19,8 +19,9 @@
 
 /////////////////////////////////////////////////////////////////////////////
 
-#define RENDERMAX (200)
-#define RINGMAX   (512) // should be nearest power of two that's at least 64 greater than RENDERMAX
+// meh, these don't like to work higher than 1 and 2
+#define RENDERMAX (1)
+#define RINGMAX   (2) // should be nearest power of two that's at least one greater than RENDERMAX
 
 /////////////////////////////////////////////////////////////////////////////
 
