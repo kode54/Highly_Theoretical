@@ -50,4 +50,8 @@
 #endif
 #endif /* INLINE */
 
+#define BOOL unsigned char
+#define FALSE 0
+#define TRUE 1
+
 #endif /* _MACROS_H_ */

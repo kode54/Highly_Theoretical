@@ -119,80 +119,74 @@ static void satsound_advancesync(struct SATSOUND_STATE *state);
 
 u32 FASTCALL satsound_cb_readb(void *state, const u32 address)
 {
-	if (address < (512*1024)) return RAMBYTEPTR[address^EMU_ENDIAN_XOR(1)^1];
+  if (address < (512*1024)) return RAMBYTEPTR[address^EMU_ENDIAN_XOR(1)^1];
 
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		int shift = ((address & 1) ^ 1) * 8;
-		satsound_advancesync(SATSOUNDSTATE);
-		return (yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFF << shift) >> shift) & 0xFF;
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    int shift = ((address & 1) ^ 1) * 8;
+    satsound_advancesync(SATSOUNDSTATE);
+    return (yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFF << shift) >> shift) & 0xFF;
+  }
 
-	return 0;
+  return 0;
 }
 
 u32 FASTCALL satsound_cb_readw(void *state, const u32 address)
 {
-	if (address < (512*1024)) return ((uint16*)(RAMBYTEPTR))[address/2];
+  if (address < (512*1024)) return ((uint16*)(RAMBYTEPTR))[address/2];
 
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		satsound_advancesync(SATSOUNDSTATE);
-		return yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFFFF);
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    satsound_advancesync(SATSOUNDSTATE);
+    return yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFFFF);
+  }
 
-	return 0;
+  return 0;
 }
 
 void FASTCALL satsound_cb_writeb(void *state, const u32 address, u32 data)
 {
-	if (address < (512*1024))
-	{
-		RAMBYTEPTR[address^EMU_ENDIAN_XOR(1)^1] = data;
-		return;
-	}
+  if (address < (512*1024)) {
+    RAMBYTEPTR[address^EMU_ENDIAN_XOR(1)^1] = data;
+    return;
+  }
 
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		uint8 breakcpu = 0;
-		int shift = ((address & 1) ^ 1) * 8;
-		satsound_advancesync(SATSOUNDSTATE);
-		//printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
-		yam_scsp_store_reg(
-			YAMSTATE,
-			address & 0xFFE,
-			(data & 0xFF) << shift,
-			0xFF << shift,
-			&breakcpu
-			);
-		if(breakcpu) C68k_Release_Cycle(SCPUSTATE);
-		return;
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    uint8 breakcpu = 0;
+    int shift = ((address & 1) ^ 1) * 8;
+    satsound_advancesync(SATSOUNDSTATE);
+    //printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
+    yam_scsp_store_reg(
+      YAMSTATE,
+      address & 0xFFE,
+      (data & 0xFF) << shift,
+      0xFF << shift,
+      &breakcpu
+    );
+    if(breakcpu) C68k_Release_Cycle(SCPUSTATE);
+    return;
+  }
 }
 
 void FASTCALL satsound_cb_writew(void *state, const u32 address, u32 data)
 {
-	if (address < (512*1024))
-	{
-		((uint16*)(RAMBYTEPTR))[address/2] = data;
-		return;
-	}
+  if (address < (512*1024)) {
+    ((uint16*)(RAMBYTEPTR))[address/2] = data;
+    return;
+  }
 
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		uint8 breakcpu = 0;
-		satsound_advancesync(SATSOUNDSTATE);
-		//printf("satsound_yam_writeword(%08X,%08X)\n",address,data);
-		yam_scsp_store_reg(
-			YAMSTATE,
-			address & 0xFFE,
-			data & 0xFFFF,
-			0xFFFF,
-			&breakcpu
-			);
-		if(breakcpu) C68k_Release_Cycle(SCPUSTATE);
-		return;
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    uint8 breakcpu = 0;
+    satsound_advancesync(SATSOUNDSTATE);
+    //printf("satsound_yam_writeword(%08X,%08X)\n",address,data);
+    yam_scsp_store_reg(
+      YAMSTATE,
+      address & 0xFFE,
+      data & 0xFFFF,
+      0xFFFF,
+      &breakcpu
+    );
+    if(breakcpu) C68k_Release_Cycle(SCPUSTATE);
+    return;
+  }
 }
 #endif
 
@@ -318,7 +312,7 @@ static void satsound_advancesync(struct SATSOUND_STATE *state) {
 #ifdef USE_STARSCREAM
   odometer = s68000_read_odometer(SCPUSTATE);
 #elif defined(USE_M68K)
-  odometer = SCPUSTATE->cycles;
+  odometer = SCPUSTATE->initial_cycles - SCPUSTATE->remaining_cycles;
 #else
   odometer = C68k_Get_CycleDone(SCPUSTATE);
   if(odometer == ~0) odometer = state->scpu_odometer_save;
@@ -507,68 +501,64 @@ static void satsound_write_dummy(void *param, unsigned int address, unsigned int
 
 static unsigned int satsound_apu_read8(void *state, unsigned int address)
 {
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		int shift = ((address & 1) ^ 1) * 8;
-		satsound_advancesync(SATSOUNDSTATE);
-		return (yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFF << shift) >> shift) & 0xFF;
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    int shift = ((address & 1) ^ 1) * 8;
+    satsound_advancesync(SATSOUNDSTATE);
+    return (yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFF << shift) >> shift) & 0xFF;
+  }
 
-	return 0;
+  return 0;
 }
 
 static unsigned int satsound_apu_read16(void *state, unsigned int address)
 {
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		satsound_advancesync(SATSOUNDSTATE);
-		return yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFFFF) & 0xFFFF;
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    satsound_advancesync(SATSOUNDSTATE);
+    return yam_scsp_load_reg(YAMSTATE, address & 0xFFE, 0xFFFF) & 0xFFFF;
+  }
 
-	return 0;
+  return 0;
 }
 
 static void satsound_apu_write8(void *state, unsigned int address, unsigned int data)
 {
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		uint8 breakcpu = 0;
-		int shift = ((address & 1) ^ 1) * 8;
-		satsound_advancesync(SATSOUNDSTATE);
-		//printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
-		yam_scsp_store_reg(
-			YAMSTATE,
-			address & 0xFFE,
-			(data & 0xFF) << shift,
-			0xFF << shift,
-			&breakcpu
-			);
-		if(breakcpu) {
-			SATSOUNDSTATE->scpu_odometer_save = SCPUSTATE->cycles;
-			SCPUSTATE->cycles = 0x10000000;
-		}
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    uint8 breakcpu = 0;
+    int shift = ((address & 1) ^ 1) * 8;
+    satsound_advancesync(SATSOUNDSTATE);
+    //printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
+    yam_scsp_store_reg(
+      YAMSTATE,
+      address & 0xFFE,
+      (data & 0xFF) << shift,
+      0xFF << shift,
+      &breakcpu
+    );
+    if(breakcpu) {
+      SATSOUNDSTATE->scpu_odometer_save = SCPUSTATE->remaining_cycles;
+      SCPUSTATE->remaining_cycles = 0;
+    }
+  }
 }
 
 static void satsound_apu_write16(void *state, unsigned int address, unsigned int data)
 {
-	if (address >= 0x100000 && address < 0x100c00)
-	{
-		uint8 breakcpu = 0;
-		satsound_advancesync(SATSOUNDSTATE);
-		//printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
-		yam_scsp_store_reg(
-			YAMSTATE,
-			address & 0xFFE,
-			data,
-			0xFFFF,
-			&breakcpu
-			);
-		if(breakcpu) {
-			SATSOUNDSTATE->scpu_odometer_save = SCPUSTATE->cycles;
-			SCPUSTATE->cycles = 0x10000000;
-		}
-	}
+  if (address >= 0x100000 && address < 0x100c00) {
+    uint8 breakcpu = 0;
+    satsound_advancesync(SATSOUNDSTATE);
+    //printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
+    yam_scsp_store_reg(
+      YAMSTATE,
+      address & 0xFFE,
+      data,
+      0xFFFF,
+      &breakcpu
+    );
+    if(breakcpu) {
+      SATSOUNDSTATE->scpu_odometer_save = SCPUSTATE->remaining_cycles;
+      SCPUSTATE->remaining_cycles = 0;
+    }
+  }
 }
 
 static void recompute_and_set_memory_maps(
@@ -685,7 +675,7 @@ sint32 EMU_CALL satsound_execute(
 #ifdef USE_STARSCREAM
   SATSOUNDSTATE->scpu_odometer_checkpoint = s68000_read_odometer(SCPUSTATE);
 #elif defined(USE_M68K)
-  SATSOUNDSTATE->scpu_odometer_checkpoint = SCPUSTATE->cycles;
+  SATSOUNDSTATE->scpu_odometer_checkpoint = 0;
 #else
   SATSOUNDSTATE->scpu_odometer_checkpoint = 0;
 #endif
@@ -729,9 +719,9 @@ sint32 EMU_CALL satsound_execute(
     if(remain > 0x1000000) { remain = 0x1000000; }
 
     if((SATSOUNDSTATE->yam_prev_int) != (*yamintptr)) {
-      SATSOUNDSTATE->yam_prev_int = (*yamintptr);
 //printf("interrupt %d\n",(int)(*yamintptr));
 #ifdef USE_STARSCREAM
+      SATSOUNDSTATE->yam_prev_int = (*yamintptr);
       if(*yamintptr) {
         s68000_interrupt(
           SCPUSTATE,
@@ -739,15 +729,16 @@ sint32 EMU_CALL satsound_execute(
         );
       }
 #elif defined(USE_M68K)
+      unsigned line = ((*yamintptr) ? *yamintptr : SATSOUNDSTATE->yam_prev_int) & 7;
+      unsigned line_state = *yamintptr ? ASSERT_LINE : RESET_LINE;
       m68k_set_irq(
         SCPUSTATE,
-        (SATSOUNDSTATE->yam_prev_int)&7
+        line,
+        line_state
       );
-      m68k_set_irq(
-        SCPUSTATE,
-        0
-      );
+      SATSOUNDSTATE->yam_prev_int = (*yamintptr);
 #else
+      SATSOUNDSTATE->yam_prev_int = (*yamintptr);
       if(*yamintptr) {
         C68k_Set_IRQ(
           SCPUSTATE,
@@ -761,7 +752,8 @@ sint32 EMU_CALL satsound_execute(
     r = s68000_execute(SCPUSTATE, remain);
     if(r != 0x80000000) {
 #elif defined(USE_M68K)
-	m68k_run(SCPUSTATE, remain);
+	SATSOUNDSTATE->scpu_odometer_save = ~0;
+    r = m68k_execute(SCPUSTATE, remain);
     if (0) {
 #else
     r = C68k_Exec(SCPUSTATE, remain);
@@ -770,21 +762,16 @@ sint32 EMU_CALL satsound_execute(
       error = -1; break;
     }
 #if !defined(USE_STARSCREAM) && !defined(USE_M68K)
-	SATSOUNDSTATE->scpu_odometer_save = r;
+    SATSOUNDSTATE->scpu_odometer_save = r;
 #endif
 #ifdef USE_M68K
-	if (SCPUSTATE->cycles >= 0x10000000) {
-		SCPUSTATE->cycles -= 0x10000000;
-		SATSOUNDSTATE->scpu_odometer_checkpoint -= SATSOUNDSTATE->scpu_odometer_save;
-	}
-	else if (SCPUSTATE->cycles >= remain) {
-		SCPUSTATE->cycles -= remain;
-		SATSOUNDSTATE->scpu_odometer_checkpoint -= remain;
-	}
+    if(SATSOUNDSTATE->scpu_odometer_save != ~0) {
+      SCPUSTATE->remaining_cycles += SATSOUNDSTATE->scpu_odometer_save;
+    }
 #endif
     satsound_advancesync(SATSOUNDSTATE);
-#if !defined(USE_STARSCREAM) && !defined(USE_M68K)
-	SATSOUNDSTATE->scpu_odometer_checkpoint = 0;
+#if !defined(USE_STARSCREAM)
+    SATSOUNDSTATE->scpu_odometer_checkpoint = 0;
 #endif
   }
   //

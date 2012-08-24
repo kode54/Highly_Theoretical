@@ -41,6 +41,9 @@
     <ClCompile Include="m68k\m68kcpu.c">
       <Filter>m68k</Filter>
     </ClCompile>
+    <ClCompile Include="m68k\m68kops.c">
+      <Filter>m68k</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="arm.h">
@@ -74,12 +77,6 @@
       <Filter>m68k</Filter>
     </ClInclude>
     <ClInclude Include="m68k\m68kcpu.h">
-      <Filter>m68k</Filter>
-    </ClInclude>
-    <ClInclude Include="m68k\m68ki_cycles.h">
-      <Filter>m68k</Filter>
-    </ClInclude>
-    <ClInclude Include="m68k\m68ki_instruction_jump_table.h">
       <Filter>m68k</Filter>
     </ClInclude>
     <ClInclude Include="m68k\m68kops.h">

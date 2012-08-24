@@ -228,7 +228,7 @@ typedef struct
   uint detected;
 } cpu_idle_t;
 
-typedef struct
+typedef struct _m68ki_cpu_core
 {
   cpu_memory_map memory_map[256]; /* memory mapping */
 
@@ -236,15 +236,20 @@ typedef struct
 
   uint irq_latency;
 
-  uint cycles;        /* current master cycle count */ 
-  uint cycle_end;     /* aimed master cycle count for current execution frame */
-
   uint dar[16];      /* Data and Address Registers */
+  uint ppc;          /* Previous program counter */
   uint pc;           /* Program Counter */
-  uint sp[5];        /* User and Interrupt Stack Pointers */
+  uint sp[7];        /* User and Interrupt Stack Pointers */
+  uint vbr;          /* Vector Base Register (m68010+) */
+  uint sfc;          /* Source Function Code Register (m68010+) */
+  uint dfc;          /* Destination Function Code Register (m68010+) */
+  uint cacr;         /* Cache Control Register (m68020, unemulated) */
+  uint caar;         /* Cache Address Register (m68020, unemulated) */
   uint ir;           /* Instruction Register */
   uint t1_flag;      /* Trace 1 */
+  uint t0_flag;      /* Trace 0 */
   uint s_flag;       /* Supervisor */
+  uint m_flag;       /* Master/Interrupt state */
   uint x_flag;       /* Extend */
   uint n_flag;       /* Negative */
   uint not_z_flag;   /* Zero, inverted for speedups */
@@ -257,6 +262,7 @@ typedef struct
   uint pref_addr;    /* Last prefetch address */
   uint pref_data;    /* Data in the prefetch queue */
 #endif
+  uint sr_mask;      /* Implemented status register bits */
 #if M68K_EMULATE_ADDRESS_ERROR
   uint instr_mode;      /* Stores whether we are in instruction mode or group 0/1 exception mode */
   uint run_mode;        /* Stores whether we are processing a reset, bus error, address error, or something else */
@@ -272,20 +278,41 @@ typedef struct
 #if M68K_EMULATE_FC
   uint address_space;   /* Current FC code */
 #endif
+  /* Clocks required for instructions / exceptions */
+  uint cyc_bcc_notake_b;
+  uint cyc_bcc_notake_w;
+  uint cyc_dbcc_f_noexp;
+  uint cyc_dbcc_f_exp;
+  uint cyc_scc_r_true;
+  uint cyc_movem_w;
+  uint cyc_movem_l;
+  uint cyc_shift;
+  uint cyc_reset;
+
+  int  initial_cycles;
+  int  remaining_cycles;                     /* Number of clocks remaining */
+  int  reset_cycles;
 
   void *param; /* User parameter */
 
+  /* Virtual IRQ lines state */
+  uint virq_state;
+  uint nmi_pending;
+
+  const unsigned char* cyc_instruction;
+  const unsigned char* cyc_exception;
+
   /* Callbacks to host */
-#if M68K_EMULATE_INT_ACK == OPT_ON
+#if M68K_EMULATE_INT_ACK
   int  (*int_ack_callback)(m68ki_cpu_core *cpu, int int_line);           /* Interrupt Acknowledge */
 #endif
-#if M68K_EMULATE_RESET == OPT_ON
+#if M68K_EMULATE_RESET
   void (*reset_instr_callback)(m68ki_cpu_core *cpu);               /* Called when a RESET instruction is encountered */
 #endif
-#if M68K_TAS_HAS_CALLBACK == OPT_ON
+#if M68K_TAS_HAS_CALLBACK
   int  (*tas_instr_callback)(m68ki_cpu_core *cpu);                 /* Called when a TAS instruction is encountered, allows / disallows writeback */
 #endif
-#if M68K_EMULATE_FC == OPT_ON
+#if M68K_EMULATE_FC
   void (*set_fc_callback)(m68ki_cpu_core *cpu, unsigned int new_fc);     /* Called when the CPU function code changes */
 #endif
 } m68ki_cpu_core;
@@ -361,15 +388,15 @@ extern void m68k_init(m68ki_cpu_core *);
 extern void m68k_pulse_reset(m68ki_cpu_core *);
 
 /* Run until given cycle count is reached */
-extern void m68k_run(m68ki_cpu_core *, unsigned int cycles);
+extern int m68k_execute(m68ki_cpu_core *, unsigned int cycles);
 
 /* Set the IPL0-IPL2 pins on the CPU (IRQ).
  * A transition from < 7 to 7 will cause a non-maskable interrupt (NMI).
  * Setting IRQ to 0 will clear an interrupt request.
  */
-extern void m68k_set_irq(m68ki_cpu_core *, unsigned int int_level);
-extern void m68k_set_irq_delay(m68ki_cpu_core *, unsigned int int_level);
-extern void m68k_update_irq(m68ki_cpu_core *, unsigned int mask);
+#define ASSERT_LINE 1
+#define RESET_LINE 0
+void m68k_set_irq(m68ki_cpu_core *m68k, int irqline, int state);
 
 /* Halt the CPU as if you pulsed the HALT pin. */
 extern void m68k_pulse_halt(m68ki_cpu_core *);

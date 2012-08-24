@@ -58,7 +58,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <PreprocessorDefinitions>WIN32;USE_STARSCREAM;_DEBUG;_LIB;EMU_COMPILE;EMU_LITTLE_ENDIAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;USE_M68K;LSB_FIRST;_DEBUG;_LIB;EMU_COMPILE;EMU_LITTLE_ENDIAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeaderOutputFile>.\Debug/SegaCore.pch</PrecompiledHeaderOutputFile>
@@ -122,7 +122,9 @@
     </ClCompile>
     <ClCompile Include="dcsound.c" />
     <ClCompile Include="m68k\m68kcpu.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="m68k\m68kops.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="satsound.c" />
@@ -138,8 +140,6 @@
     <ClInclude Include="m68k\m68k.h" />
     <ClInclude Include="m68k\m68kconf.h" />
     <ClInclude Include="m68k\m68kcpu.h" />
-    <ClInclude Include="m68k\m68ki_cycles.h" />
-    <ClInclude Include="m68k\m68ki_instruction_jump_table.h" />
     <ClInclude Include="m68k\m68kops.h" />
     <ClInclude Include="m68k\macros.h" />
     <ClInclude Include="satsound.h" />
