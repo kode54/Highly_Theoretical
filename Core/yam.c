@@ -20,8 +20,8 @@
 /////////////////////////////////////////////////////////////////////////////
 
 // meh, these don't like to work higher than 1 and 2
-#define RENDERMAX (1)
-#define RINGMAX   (2) // should be nearest power of two that's at least one greater than RENDERMAX
+#define RENDERMAX (200)
+#define RINGMAX   (256) // should be nearest power of two that's at least one greater than RENDERMAX
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -99,6 +99,33 @@ static sint32 qtable[32] = {
 
 // Lifted from MAME/etc cores by kode54, in an attempt to fix some stuff
 //Envelope times in ms
+#define LFO_SHIFT   8
+
+struct _LFO
+{
+  unsigned short phase;
+  uint32 phase_step;
+  int *table;
+  int *scale;
+};
+
+#define LFIX(v)  ((unsigned int) ((float) (1<<LFO_SHIFT)*(v)))
+
+//Convert DB to multiply amplitude
+#define DB(v)   LFIX(pow(10.0,v/20.0))
+
+//Convert cents to step increment
+#define CENTS(v) LFIX(pow(2.0,v/1200.0))
+
+static int PLFO_TRI[256],PLFO_SQR[256],PLFO_SAW[256],PLFO_NOI[256];
+static int ALFO_TRI[256],ALFO_SQR[256],ALFO_SAW[256],ALFO_NOI[256];
+static float LFOFreq[32]={0.17,0.19,0.23,0.27,0.34,0.39,0.45,0.55,0.68,0.78,0.92,1.10,1.39,1.60,1.87,2.27,
+  2.87,3.31,3.92,4.79,6.15,7.18,8.60,10.8,14.4,17.2,21.5,28.7,43.1,57.4,86.1,172.3};
+static float ASCALE[8]={0.0,0.4,0.8,1.5,3.0,6.0,12.0,24.0};
+static float PSCALE[8]={0.0,7.0,13.5,27.0,55.0,112.0,230.0,494};
+static int PSCALES[8][256];
+static int ASCALES[8][256];
+
 static const double ARTimes[64]={100000/*infinity*/,100000/*infinity*/,8100.0,6900.0,6000.0,4800.0,4000.0,3400.0,3000.0,2400.0,2000.0,1700.0,1500.0,
   1200.0,1000.0,860.0,760.0,600.0,500.0,430.0,380.0,300.0,250.0,220.0,190.0,150.0,130.0,110.0,95.0,
   76.0,63.0,55.0,47.0,38.0,31.0,27.0,24.0,19.0,15.0,13.0,12.0,9.4,7.9,6.8,6.0,4.7,3.8,3.4,3.0,2.4,
@@ -107,6 +134,7 @@ static const double DRTimes[64]={100000/*infinity*/,100000/*infinity*/,118200.0,
   14800.0,12700.0,11100.0,8900.0,7400.0,6300.0,5500.0,4400.0,3700.0,3200.0,2800.0,2200.0,1800.0,1600.0,1400.0,1100.0,
   920.0,790.0,690.0,550.0,460.0,390.0,340.0,270.0,230.0,200.0,170.0,140.0,110.0,98.0,85.0,68.0,57.0,49.0,43.0,34.0,
   28.0,25.0,22.0,18.0,14.0,12.0,11.0,8.5,7.1,6.1,5.4,4.3,3.6,3.1};
+static uint32 FNS_Table[0x400];
 static sint32 EG_TABLE[0x400];
 static int ARTABLE[64];
 static int DRTABLE[64];
@@ -124,9 +152,76 @@ static sint32 RPANTABLE_AICA[0x20000];
 #define SHIFT   10
 #define FIX(v)  ((sint32) ((float) (1<<SHIFT)*(v)))
 
+#define log_base_2(n) (log((float) n)/log((float) 2))
+
 static void yam_init_tables()
 {
-  sint32 i;
+  sint32 i,s;
+
+  for(i=0;i<256;++i) {
+    int a,p;
+    //    float TL;
+    //Saw
+    a=255-i;
+    if(i<128)
+      p=i;
+    else
+      p=i-256;    
+    ALFO_SAW[i]=a;
+    PLFO_SAW[i]=p;
+
+    //Square
+    if(i<128) {
+      a=255;
+      p=127;
+    }
+    else {
+      a=0;
+      p=-128;
+    }
+    ALFO_SQR[i]=a;
+    PLFO_SQR[i]=p;
+
+    //Tri
+    if(i<128)
+      a=255-(i*2);
+    else
+      a=(i*2)-256;
+    if(i<64)
+      p=i*2;
+    else if(i<128)
+      p=255-i*2;
+    else if(i<192)
+      p=256-i*2;
+    else
+      p=i*2-511;
+    ALFO_TRI[i]=a;
+    PLFO_TRI[i]=p;
+
+    //noise
+    //a=lfo_noise[i];
+    a=rand()&0xff;
+    p=128-a;
+    ALFO_NOI[i]=a;
+    PLFO_NOI[i]=p;
+  }
+
+  for(s=0;s<8;++s) {
+    float limit=PSCALE[s];
+    for(i=-128;i<128;++i) {
+      PSCALES[s][i+128]=CENTS(((limit*(float) i)/128.0));
+    }
+    limit=-ASCALE[s];
+    for(i=0;i<256;++i) {
+      ASCALES[s][i]=DB(((limit*(float) i)/256.0));
+    }
+  }
+
+  for(i=0;i<0x400;++i) {
+    float fcent=(double) 1200.0*log_base_2((double)(((double) 1024.0+(double)i)/(double)1024.0));
+    fcent=(double) 44100.0*pow(2.0,fcent/1200.0);
+    FNS_Table[i]=(float) (1<<SHIFT) *fcent;
+  }
 
   for(i=0;i<0x400;++i) {
     float envDB=((float)(3*(i-0x3ff)))/32.0;
@@ -325,14 +420,16 @@ struct _EG
 struct YAM_CHAN {
   uint8 kyonb;
   uint8 ssctl;
-  sint8 sampler_dir;
   uint8 sampler_looptype;
   sint32 sampler_invert; // bits 15-31 = invert sign bit, bits 0-14 = invert other bits
   uint8 pcms;
   uint32 sampleaddr;
   sint32 loopstart;
   sint32 loopend;
+  uint8 Backwards;  //the wave is playing backwards
   struct _EG EG;
+  struct _LFO PLFO;    //Phase LFO
+  struct _LFO ALFO;    //Amplitude LFO
   uint8 ar[4]; // amplitude envelope rate: attack, decay, sustain, release
   uint8 dl;
   uint8 krs;
@@ -363,19 +460,21 @@ struct YAM_CHAN {
   uint16 lpflevel;
   uint8 lpfstate;
   uint8 lp;
-  uint32 playpos;
-  sint32 playpos_offset; // used for modulation
+  sint32 prv_addr;    // previous play address (for ADPCM)
+  uint32 cur_addr;
+  uint32 nxt_addr;
+  uint32 step; //pitch step (24.8)
   uint32 frcphase;
   uint32 lfophase;
   sint32 samplebufcur; // these are 16-bit signed
   sint32 samplebufnext; // these are 16-bit signed
+  int cur_sample;       //current ADPCM sample
+  int cur_quant;        //current ADPCM step
+  int curstep;
+  int cur_lpquant, cur_lpsample, cur_lpstep;
+  uint32 adbase, adlpbase;
   sint32 lpp1;
   sint32 lpp2;
-  sint32 adpcmstep;
-  sint32 adpcmstep_loopstart;
-  sint32 adpcmprev;
-  sint32 adpcmprev_loopstart;
-  uint8 adpcminloop;
 };
 
 struct MPRO {
@@ -856,7 +955,7 @@ static void Compute_EG(struct YAM_CHAN *chan)
   chan->EG.EGHOLD=chan->eghold;
 }
 
-static void keyoff(struct YAM_CHAN *chan);
+static void keyoff(struct YAM_CHAN *chan, int keyoff);
 
 static int EG_Update(struct YAM_CHAN *chan)
 {
@@ -900,7 +999,7 @@ static int EG_Update(struct YAM_CHAN *chan)
       chan->EG.volume-=chan->EG.RR;
       if(chan->EG.volume<=0) {
         chan->EG.volume=0;
-        keyoff(chan);
+        keyoff(chan, 0);
       }
       break;
     default:
@@ -913,118 +1012,166 @@ static int EG_Update(struct YAM_CHAN *chan)
 #endif
 }
 
+static uint32 AICA_Step(struct YAM_CHAN *chan)
+{
+  int octave=chan->oct;
+  uint32 Fn;
+
+  Fn=(FNS_Table[chan->fns]);  //24.8
+  if(octave&8)
+    Fn>>=(16-octave);
+  else
+    Fn<<=octave;
+
+  return Fn/(44100);
+}
+
+static signed int PLFO_Step(struct _LFO *LFO)
+{
+  int p;
+  LFO->phase+=LFO->phase_step;    
+#if LFO_SHIFT!=8    
+  LFO->phase&=(1<<(LFO_SHIFT+8))-1;
+#endif    
+  p=LFO->table[LFO->phase>>LFO_SHIFT];
+  p=LFO->scale[p+128];
+  return p<<(SHIFT-LFO_SHIFT);
+}
+
+static signed int ALFO_Step(struct _LFO *LFO)
+{
+  int p;
+  LFO->phase+=LFO->phase_step;    
+#if LFO_SHIFT!=8    
+  LFO->phase&=(1<<(LFO_SHIFT+8))-1;
+#endif    
+  p=LFO->table[LFO->phase>>LFO_SHIFT];
+  p=LFO->scale[p];
+  return p<<(SHIFT-LFO_SHIFT);
+}
+
+static void LFO_ComputeStep(struct _LFO *LFO,sint32 LFOF,sint32 LFOWS,sint32 LFOS,int ALFO)
+{
+  float step=(float) LFOFreq[LFOF]*256.0/(float)44100.0;
+  LFO->phase_step=(unsigned int) ((float) (1<<LFO_SHIFT)*step);
+  if(ALFO) {
+    switch(LFOWS)
+    {
+    case 0: LFO->table=ALFO_SAW; break;
+    case 1: LFO->table=ALFO_SQR; break;
+    case 2: LFO->table=ALFO_TRI; break;
+    case 3: LFO->table=ALFO_NOI; break;
+    }
+    LFO->scale=ASCALES[LFOS];
+  }
+  else {
+    switch(LFOWS)
+    {
+    case 0: LFO->table=PLFO_SAW; break;
+    case 1: LFO->table=PLFO_SQR; break;
+    case 2: LFO->table=PLFO_TRI; break;
+    case 3: LFO->table=PLFO_NOI; break;
+    }
+    LFO->scale=PSCALES[LFOS];
+  }
+}
+
+static void Compute_LFO(struct YAM_CHAN *chan)
+{
+  if(chan->plfos!=0)
+    LFO_ComputeStep(&(chan->PLFO),chan->lfof,chan->plfows,chan->plfos,0);
+  if(chan->alfos!=0)
+    LFO_ComputeStep(&(chan->ALFO),chan->lfof,chan->alfows,chan->alfos,1);
+}
+
+#define ADPCMSHIFT  8
+#define ADFIX(f)    (int) ((float) f*(float) (1<<ADPCMSHIFT))
+
+const int TableQuant[8]={ADFIX(0.8984375),ADFIX(0.8984375),ADFIX(0.8984375),ADFIX(0.8984375),ADFIX(1.19921875),ADFIX(1.59765625),ADFIX(2.0),ADFIX(2.3984375)};
+const int quant_mul[16]= { 1, 3, 5, 7, 9, 11, 13, 15, -1, -3, -5, -7, -9, -11, -13, -15};
+
+void InitADPCM(int *PrevSignal, int *PrevQuant)
+{
+  *PrevSignal=0;
+  *PrevQuant=0x7f;
+}
+
+#define ICLIP16(x) ((((x)+0x8000)&0xFFFF0000)?(((x)>>31)^0x7FFF):(x))
+
+static signed short DecodeADPCM(int *PrevSignal, unsigned char Delta, int *PrevQuant)
+{
+  int x = *PrevQuant * quant_mul [Delta & 15];
+  x = *PrevSignal + ((int)(x + ((UINT32)x >> 29)) >> 3);
+  *PrevSignal=ICLIP16(x);
+  *PrevQuant=(*PrevQuant*TableQuant[Delta&7])>>ADPCMSHIFT;
+  *PrevQuant=(*PrevQuant<0x7f)?0x7f:((*PrevQuant>0x6000)?0x6000:*PrevQuant);
+  return *PrevSignal;
+}
+
 /////////////////////////////////////////////////////////////////////////////
 //
 // Key on/off
 //
-static void keyon(struct YAM_CHAN *chan) {
+static void keyon(struct YAM_STATE *state, struct YAM_CHAN *chan) {
 //printf("keyon %08X\n",chan);
   // Ignore redundant key-ons
   if(chan->EG.state != RELEASE) return;
-  chan->sampler_dir = 1;
-  chan->playpos = 0;
+  chan->cur_addr = 0;
+  chan->nxt_addr = 1 << SHIFT;
+  chan->Backwards=0;
+  chan->step=AICA_Step(chan);
   chan->lpflevel = chan->flv[0];
   chan->lpfstate = 0;
-  chan->adpcmstep = 0x7F;
-  chan->adpcmstep_loopstart = 0;
-  chan->adpcmprev = 0;
-  chan->adpcmprev_loopstart = 0;
-  chan->adpcminloop = 0;
   chan->samplebufcur = 0;
   chan->samplebufnext = 0;
   Compute_EG(chan);
   chan->EG.state=ATTACK;
   chan->EG.volume=0x17F<<EG_SHIFT;
+  Compute_LFO(chan);
 //printf("keyon %08X passed\n",chan);
+  if (chan->pcms >= 2)
+  {
+    uint8 *base;
+    uint32 adbase;
+    uint32 curstep, steps_to_go;
+
+    chan->curstep = 0;
+    chan->adbase = chan->sampleaddr & state->ram_mask;
+    InitADPCM(&(chan->cur_sample), &(chan->cur_quant));
+    InitADPCM(&(chan->cur_lpsample), &(chan->cur_lpquant));
+
+    // walk to the ADPCM state at LSA
+    curstep = 0;
+    base = ((uint8*)state->ram_ptr);
+    adbase = chan->adbase;
+    steps_to_go = chan->loopstart;
+
+    while (curstep < steps_to_go) {
+      int shift1, delta1;
+      shift1 = 4*((curstep&1));
+      delta1 = (base[adbase]>>shift1)&0xf;
+      DecodeADPCM(&(chan->cur_lpsample),delta1,&(chan->cur_lpquant));
+      curstep++;
+      if (!(curstep & 1)) {
+        adbase = (adbase + 1) & state->ram_mask;
+      }
+    }
+
+    chan->cur_lpstep = curstep;
+    chan->adlpbase = adbase;
+
+    // on real hardware this creates undefined behavior.
+    if (chan->loopstart > chan->loopend) {
+      chan->loopend = 0xFFFF;
+    }
+  }
 }
 
-static void keyoff(struct YAM_CHAN *chan) {
+static void keyoff(struct YAM_CHAN *chan,int keyoff) {
   chan->EG.state = RELEASE;
   chan->lpfstate = 3;
-}
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// Estimate play position for a channel
-//
-// These are ROUGH approximations, and will not be entirely accurate in the
-// following conditions:
-//
-// - any pitch LFO is applied
-// - bidirectional loop mode
-// - weird values of loopstart or loopend
-//
-static uint32 calculate_playpos(
-  struct YAM_STATE *state,
-  struct YAM_CHAN *chan
-) {
-  sint32 p, deltap, loopsize;
-
-  if(!(chan->sampler_dir)) return 0;
-
-  if(state->out_pending > 100) yam_flush(state);
-
-  loopsize = chan->loopend - chan->loopstart;
-  if(loopsize < 1) { loopsize = 1; }
-
-  { uint32 oct = chan->oct^8;
-    uint32 fns = chan->fns^0x400;
-    uint32 base_phaseinc = fns << oct;
-    // weird ADPCM thing mentioned in official doc
-    if(chan->pcms == 2 && oct >= 0xA) { base_phaseinc <<= 1; }
-    deltap = base_phaseinc * ((uint32)(state->out_pending));
-    deltap &= 0x7FFFFFFF;
-    deltap >>= 18;
-  }
-  p = ((uint16)(chan->playpos));
-
-  switch(chan->sampler_looptype) {
-  case LOOP_NONE:
-    p += deltap;
-    if(p >= chan->loopend) p = 0;
-    break;
-  case LOOP_FORWARDS:
-    p += deltap;
-    if(p >= chan->loopstart) {
-      p -= chan->loopstart;
-      p %= loopsize;
-      p += chan->loopstart;
-    }
-    break;
-  case LOOP_BACKWARDS:
-    if(p >= chan->loopstart) {
-      p -= chan->loopstart;
-      p = loopsize - p;
-      p += chan->loopstart;
-    }
-    p += deltap;
-    if(p >= chan->loopstart) {
-      p -= chan->loopstart;
-      p %= loopsize;
-      p += chan->loopstart;
-    }
-    if(p >= chan->loopstart) {
-      p -= chan->loopstart;
-      p = loopsize - p;
-      p += chan->loopstart;
-    }
-    break;
-  case LOOP_BIDIRECTIONAL:
-    if(chan->sampler_dir < 0) {
-      p = chan->loopend + loopsize - (p - chan->loopstart);
-    }
-    p += deltap;
-    if(p >= chan->loopstart) {
-      p -= chan->loopstart;
-      p %= 2 * loopsize;
-      p += chan->loopstart;
-    }
-    if(p >= chan->loopend) {
-      p = chan->loopend - (p - chan->loopend);
-    }
-    break;
-  }
-  return p & 0xFFFF;
+  if(!keyoff) chan->EG.volume = 0;
+  chan->kyonb = 0;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1132,10 +1279,10 @@ static void chan_scsp_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
         for(ch = 0; ch < 32; ch++) {
           if(state->chan[ch].kyonb) {
 //printf("*");
-            keyon(state->chan + ch);
+            keyon(state, state->chan + ch);
           } else { 
 //printf(".");
-            keyoff(state->chan + ch);
+            keyoff(state->chan + ch, 1);
           }
         }
 //printf("\n");
@@ -1213,6 +1360,7 @@ static void chan_scsp_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
       chan->fns |= d & 0x700;
       chan->oct = (d >> 11) & 0xF;
     }
+    chan->step = AICA_Step(chan);
     break;
   case 0x12: // LFOControl
     if(mask & 0x00FF) {
@@ -1225,6 +1373,7 @@ static void chan_scsp_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
       chan->lfof   = (d >> 10) & 0x1F;
       chan->lfore  = (d >> 15) & 1;
     }
+    Compute_LFO(chan);
     break;
   case 0x14: // DSPInputSelect
     if(mask & 0x00FF) {
@@ -1355,8 +1504,8 @@ static void chan_aica_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
       if(d & 0x8000) { // kyonex
         int ch;
         for(ch = 0; ch < 64; ch++) {
-          if(state->chan[ch].kyonb) { keyon(state->chan + ch); }
-          else { keyoff(state->chan + ch); }
+          if(state->chan[ch].kyonb) { keyon(state, state->chan + ch); }
+          else { keyoff(state->chan + ch, 1); }
         }
       }
     }
@@ -1408,6 +1557,7 @@ static void chan_aica_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
       chan->fns |= d & 0x700;
       chan->oct = (d >> 11) & 0xF;
     }
+    chan->step = AICA_Step(chan);
     break;
   case 0x1C: // LFOControl
     if(mask & 0x00FF) {
@@ -1420,6 +1570,7 @@ static void chan_aica_store_reg(struct YAM_STATE *state, uint8 ch, uint8 a, uint
       chan->lfof   = (d >> 10) & 0x1F;
       chan->lfore  = (d >> 15) & 1;
     }
+    Compute_LFO(chan);
     break;
   case 0x20: // DSPChannelSend
     if(mask & 0x00FF) {
@@ -1695,7 +1846,7 @@ uint32 EMU_CALL yam_scsp_load_reg(void *state, uint32 a, uint32 mask) {
 
       if(YAMSTATE->out_pending > 0) yam_flush(YAMSTATE);
 
-      d = calculate_playpos(YAMSTATE, YAMSTATE->chan + c);
+      d = YAMSTATE->chan[c].cur_addr >> (SHIFT+5);
       d &= 0xF000; d >>= 5;
 
 //
@@ -1973,7 +2124,7 @@ uint32 EMU_CALL yam_aica_load_reg(void *state, uint32 a, uint32 mask) {
       }
     }
     break;
-  case 0x2814: d = calculate_playpos(YAMSTATE, YAMSTATE->chan + ((YAMSTATE->mslc) & 0x3F)); break;
+  case 0x2814: d = (YAMSTATE->chan[YAMSTATE->mslc].cur_addr)>>(SHIFT+12); break;
   case 0x2880: d = YAMSTATE->mrwinh & 0xF; break;
   case 0x2884: d = 0; break;
   case 0x2888: d = 0; break;
@@ -2193,112 +2344,201 @@ static int env_needstep(uint32 effrate, uint32 odometer) {
 //
 // Read next sample
 //
-static void readnextsample(
-  struct YAM_STATE *state,
-  struct YAM_CHAN *chan,
-  uint32 odometer
-) {
-  sint32 s = 0;
-  uint32 playpos;
-  //
-  // If the sampler is inactive, simply write 0
-  //
-  if(!(chan->sampler_dir)) goto done;
-  //
-  // Process envelope link and lowpass phase reset
-  //
-  if(chan->playpos == chan->loopstart) {
-    if(chan->link && chan->EG.state == ATTACK) { chan->EG.state = DECAY1; }
-    if(chan->lfore) chan->lfophase = 0;
-    // and save adpcm loop-start values
-    if(!(chan->adpcminloop)) {
-      chan->adpcmstep_loopstart = chan->adpcmstep;
-      chan->adpcmprev_loopstart = chan->adpcmprev;
-      chan->adpcminloop = 1;
+static sint32 AICA_UpdateSlot(struct YAM_STATE *state, struct YAM_CHAN *chan)
+{
+  INT32 sample, fpart;
+  int cur_sample;       //current sample
+  int nxt_sample;       //next sample
+  int step=chan->step;
+  uint32 addr1,addr2,addr_select;                                   // current and next sample addresses
+  uint32 *addr[2]      = {&addr1, &addr2};                          // used for linear interpolation
+  uint32 *slot_addr[2] = {&(chan->cur_addr), &(chan->nxt_addr)};    //
+
+  if(chan->ssctl!=0)  //no FM or noise yet
+    return 0;
+
+  if(chan->plfos!=0) {
+    step=step*PLFO_Step(&(chan->PLFO));
+    step>>=SHIFT;
+  }
+
+  if(chan->pcms == 0) {
+    addr1=(chan->cur_addr>>(SHIFT-1))&state->ram_mask&~1;
+    addr2=(chan->nxt_addr>>(SHIFT-1))&state->ram_mask&~1;
+  }
+  else {
+    addr1=chan->cur_addr>>SHIFT;
+    addr2=chan->nxt_addr>>SHIFT;
+  }
+
+  if(state->version == 1 && (chan->mdl!=0 || chan->mdxsl!=0 || chan->mdysl!=0))
+  {
+    sint32 smp=(state->ringbuf[(state->bufptr-64+chan->mdxsl)&(32*RINGMAX-1)]+state->ringbuf[(state->bufptr-64+chan->mdysl)&(32*RINGMAX-1)])/2;
+
+    smp<<=0xA; // associate cycle with 1024
+    smp>>=0x1A-chan->mdl; // ex. for MDL=0xF, sample range corresponds to +/- 64 pi (32=2^5 cycles) so shift by 11 (16-5 == 0x1A-0xF)
+    if(chan->pcms == 0) smp<<=1;
+
+    addr1+=smp; addr2+=smp;
+  }
+
+  if(chan->pcms == 1)  // 8-bit signed
+  {
+    sint8 *p1=(signed char *) (((uint8*)state->ram_ptr)+(((chan->sampleaddr+addr1)^state->mem_byte_address_xor)&state->ram_mask));
+    sint8 *p2=(signed char *) (((uint8*)state->ram_ptr)+(((chan->sampleaddr+addr2)^state->mem_byte_address_xor)&state->ram_mask));
+    cur_sample = (p1[0] << 8) ^ chan->sampler_invert;
+    nxt_sample = (p2[0] << 8) ^ chan->sampler_invert;
+  }
+  else if (chan->pcms == 0)  //16 bit signed
+  {
+    sint16 *p1=(signed short *) (((uint8*)state->ram_ptr)+(((chan->sampleaddr+addr1)^state->mem_word_address_xor)&state->ram_mask&~1));
+    sint16 *p2=(signed short *) (((uint8*)state->ram_ptr)+(((chan->sampleaddr+addr2)^state->mem_word_address_xor)&state->ram_mask&~1));
+    cur_sample = p1[0] ^ chan->sampler_invert;
+    nxt_sample = p2[0] ^ chan->sampler_invert;
+  }
+  else  // 4-bit ADPCM
+  {
+    uint32 adbase = chan->adbase;
+    uint8 *base;
+    uint32 steps_to_go = addr2, curstep = chan->curstep;
+
+    if(adbase) {
+      base = ((uint8*)state->ram_ptr);
+      cur_sample = chan->cur_sample; // may already contains current decoded sample 
+
+      // seek to the interpolation sample
+      while (curstep < steps_to_go) {
+        int shift1, delta1;
+        shift1 = 4*((curstep&1));
+        delta1 = (base[adbase]>>shift1)&0xf;
+        DecodeADPCM(&(chan->cur_sample),delta1,&(chan->cur_quant));
+        curstep++;
+        if (!(curstep & 1)) {
+          adbase = (adbase + 1) & state->ram_mask;
+        }
+        if (curstep == addr1)
+          cur_sample = chan->cur_sample;
+      }
+      nxt_sample = chan->cur_sample;
+
+      chan->adbase = adbase;
+      chan->curstep = curstep;
     }
-    // maybe do something if the loop type is fancy
-    switch(chan->sampler_looptype) {
-    case LOOP_NONE:
-    case LOOP_FORWARDS:
+    else {
+      cur_sample = nxt_sample = 0;
+    }
+  }
+
+  fpart = chan->cur_addr & ((1<<SHIFT)-1);
+  sample=cur_sample*((1<<SHIFT)-fpart)+nxt_sample*fpart;
+  sample>>=SHIFT;
+
+  chan->prv_addr=chan->cur_addr;
+  if(chan->Backwards)
+    chan->cur_addr-=step;
+  else
+    chan->cur_addr+=step;
+  chan->nxt_addr=chan->cur_addr+(1<<SHIFT);
+
+  addr1=chan->cur_addr>>SHIFT;
+  addr2=chan->nxt_addr>>SHIFT;
+
+  if(addr1>=chan->loopstart && !(chan->Backwards)) {
+    if(chan->link && chan->EG.state==ATTACK)
+      chan->EG.state = DECAY1;
+  }
+
+  for (addr_select=0;addr_select<2;addr_select++)
+  {
+    INT32 rem_addr;
+    switch(chan->sampler_looptype)
+    {
+    case 0:  //no loop
+      if(*addr[addr_select]>=chan->loopstart && *addr[addr_select]>=chan->loopend) {
+        keyoff(chan, 0);
+      }
       break;
-    case LOOP_BACKWARDS:
-      chan->playpos = chan->loopend - 1;
-      chan->playpos &= 0xFFFF;
-      chan->sampler_dir = -1;
+    case 1: //normal loop
+      if(*addr[addr_select]>=chan->loopend) {
+        rem_addr = *slot_addr[addr_select] - (chan->loopend<<SHIFT);
+        *slot_addr[addr_select]=(chan->loopstart<<SHIFT) + rem_addr;
+		if(chan->pcms>=2) {
+          // restore the state @ LSA - the sampler will naturally walk to (LSA + remainder)
+          chan->adbase = (chan->sampleaddr+(chan->loopstart/2))&state->ram_mask;
+          chan->curstep = chan->loopstart;
+          if (chan->pcms == 2) {
+            chan->cur_sample = chan->cur_lpsample;
+            chan->cur_quant = chan->cur_lpquant;
+          }
+        //printf("Looping: slot_addr %x LSA %x LEA %x step %x base %x\n", slot->cur_addr>>SHIFT, LSA(slot), LEA(slot), slot->curstep, slot->adbase);
+        }
+      }
       break;
-    case LOOP_BIDIRECTIONAL:
-      chan->sampler_dir = 1;
+    case 2:  //reverse loop
+      if((*addr[addr_select]>=chan->loopstart) && !(chan->Backwards)) {
+        rem_addr = *slot_addr[addr_select] - (chan->loopstart<<SHIFT);
+        *slot_addr[addr_select]=(chan->loopend<<SHIFT) - rem_addr;
+        chan->Backwards = 1;
+      }
+      else if((*addr[addr_select]<chan->loopstart || (*slot_addr[addr_select]&0x80000000)) && chan->Backwards) {
+        rem_addr = (chan->loopstart<<SHIFT) - *slot_addr[addr_select];
+        *slot_addr[addr_select]=(chan->loopend<<SHIFT) - rem_addr;
+      }
+      break;
+    case 3: //ping-pong
+      if(*addr[addr_select]>=chan->loopend) //reached end, reverse till start
+      {
+        rem_addr = *slot_addr[addr_select] - (chan->loopend<<SHIFT); 
+        *slot_addr[addr_select]=(chan->loopend<<SHIFT) - rem_addr;
+        chan->Backwards = 1;
+      }
+      else if((*addr[addr_select]<chan->loopstart || (*slot_addr[addr_select]&0x80000000)) && chan->Backwards)//reached start or negative
+      {
+        rem_addr = (chan->loopstart<<SHIFT) - *slot_addr[addr_select];
+        *slot_addr[addr_select]=(chan->loopstart<<SHIFT) + rem_addr;
+        chan->Backwards = 0;
+      }
       break;
     }
   }
-  //
-  // Obtain sample
-  //
-  playpos = chan->playpos + chan->playpos_offset;
-  switch(chan->pcms) {
-  case 0: // 16-bit signed LSB-first
-    s = *(sint16*)(((sint8*)(state->ram_ptr)) + (((chan->sampleaddr + 2 * playpos) ^ (state->mem_word_address_xor))  & (state->ram_mask)));
-    s ^= chan->sampler_invert;
-    break;
-  case 1: // 8-bit signed
-    s = *(sint8*)(((sint8*)(state->ram_ptr)) + (((chan->sampleaddr + playpos) ^ (state->mem_byte_address_xor)) & (state->ram_mask)));
-    s ^= chan->sampler_invert >> 8;
-    s <<= 8;
-    break;
-  case 2: // 4-bit ADPCM
-    s = *(uint8*)(((uint8*)(state->ram_ptr)) + (((chan->sampleaddr + (playpos >> 1)) ^ (state->mem_byte_address_xor)) & (state->ram_mask)));
-    s >>= 4 * ((playpos & 1) ^ 0);
-    s &= 0xF;
-    { sint32 out = chan->adpcmprev;
-      out += (chan->adpcmstep * adpcmdiff[s]) / 8;
-      if(out > ( 0x7FFF)) { out = ( 0x7FFF); /* logf("<adpcmoverflow>"); */ }
-      if(out < (-0x8000)) { out = (-0x8000); /* logf("<adpcmunderflow>"); */ }
-      chan->adpcmstep = (chan->adpcmstep * adpcmscale[s & 7]) >> 8;
-      if(chan->adpcmstep > 0x6000) { chan->adpcmstep = 0x6000; }
-      if(chan->adpcmstep < 0x007F) { chan->adpcmstep = 0x007F; }
-      chan->adpcmprev = out;
-      s = out;
+
+  if(chan->alfos!=0) {
+    sample=sample*ALFO_Step(&(chan->ALFO));
+    sample>>=SHIFT;
+  }
+
+  if(chan->EG.state==ATTACK)
+    sample=(sample*EG_Update(chan))>>SHIFT;
+  else
+    sample=(sample*EG_TABLE[EG_Update(chan)>>(SHIFT-10)])>>SHIFT;
+
+  if(state->version == 1 && !chan->stwinh)
+  {
+    unsigned short Enc = ((chan->tl)<<0x0)|(0x7<<0xd);
+    state->ringbuf[state->bufptr] = (sample * LPANTABLE_SCSP[Enc])>>(SHIFT+1);
+  }
+
+  /*if(chan->mslc) {
+    AICA->udata.data[0x14/2] = addr1;
+    if (!(AFSEL(AICA))) {
+      UINT16 res;
+
+      AICA->udata.data[0x10/2] |= slot->EG.state<<13;
+
+      res = 0x3FF - (slot->EG.volume>>EG_SHIFT);
+
+      res *= 959;
+      res /= 1024;
+
+      if (res > 959) res = 959;
+
+      AICA->udata.data[0x10/2] = res;
+
+      //AICA->udata.data[0x10/2] |= 0x3FF - (slot->EG.volume>>EG_SHIFT);
     }
-    break;
-  }
-  switch(chan->ssctl) {
-  case 0: break;
-  case 1: s = ((sint16)(yamrand16(state))); break;
-  case 2: s = 0; break;
-  case 3: s = 0; break;
-  }
-  //
-  // Advance play position
-  //
-  chan->playpos += ((sint32)(chan->sampler_dir));
-  chan->playpos &= 0xFFFF;
-  if(chan->playpos == chan->loopend) {
-    switch(chan->sampler_looptype) {
-    case LOOP_NONE:
-      chan->sampler_dir = 0;
-      chan->playpos = 0;
-      goto done;
-    case LOOP_FORWARDS:
-      chan->playpos = chan->loopstart;
-      chan->adpcmstep = chan->adpcmstep_loopstart;
-      chan->adpcmprev = chan->adpcmprev_loopstart;
-      chan->lp = 1;
-      break;
-    case LOOP_BACKWARDS:
-      break;
-    case LOOP_BIDIRECTIONAL:
-      chan->sampler_dir = -1;
-      chan->playpos -= 2;
-      chan->playpos &= 0xFFFF;
-      break;
-    }
-  }
-done:
-  //
-  // Write the new sample
-  //
-  chan->samplebufcur = chan->samplebufnext;
-  chan->samplebufnext = s;
+  }*/
+
+  return sample;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2315,30 +2555,12 @@ static uint32 generate_samples(
   uint32 samples
 ) {
   uint32 g;
-  uint32 base_phaseinc;
-  uint32 lfophaseinc = lfophaseinctable[chan->lfof];
   uint32 bufptrsave = state->bufptr;
-  uint32 mdlsrc = state->version == 1 && !chan->stwinh;
-  sint32 vol_l, vol_r;
 
 //gfreq[samples]++;
 
 //printf("generate_samples(%08X,%08X,%u)\n",chan,buf,samples);
 
-  { uint32 oct = chan->oct^8;
-    uint32 fns = chan->fns^0x400;
-    base_phaseinc = fns << oct;
-    // weird ADPCM thing mentioned in official doc
-    if(chan->pcms == 2 && oct >= 0xA) { base_phaseinc <<= 1; }
-  }
-
-  convert_stereo_send_level(
-    chan->tl,
-    0x7,
-    0x0,
-    &vol_l, &vol_r,
-    1
-  );
   for(g = 0; g < samples; g++) {
 //buf[g]=g*100;continue;
     //
@@ -2351,56 +2573,8 @@ static uint32 generate_samples(
     // If we must generate a sample, generate it
     //
     if(buf) {
-      sint32 s, s_cur, s_next, f;
-      // Generate interpolated sample
-      s_cur  = chan->samplebufcur;
-      s_next = chan->samplebufnext;
-      f = ((chan->frcphase) >> 4) & 0x3FFF;
-      s = (s_next * f) + (s_cur * (0x4000-f));
-      s >>= 14; // s is 16-bit
-      // Apply attenuation, if we want it
-      if(!(chan->voff)) {
-        uint32 attenuation;
-        sint32 linearvol;
-        attenuation = 0;
-        // LFO amplitude modulation
-        if(chan->alfos) {
-          uint32 att_wave_y = 0;
-          switch(chan->alfows) {
-          case 0: // sawtooth
-            att_wave_y = ((uint32)(chan->lfophase)) >> 24;
-            break;
-          case 1: // square
-            att_wave_y = (((sint32)(chan->lfophase)) >> 31) & 0xFF;
-            break;
-          case 2: // triangle
-            att_wave_y = (chan->lfophase >> 23) & 0xFF;
-            if(chan->lfophase & 0x80000000) { att_wave_y ^= 0xFF; }
-            break;
-          case 3: // noise
-            att_wave_y = yamrand16(state) & 0xFF;
-            break;
-          }
-          attenuation += (att_wave_y >> (7 - (chan->alfos)));
-        }
-        if(attenuation >= 0x3C0) {
-          s = 0;
-        } else {
-          // Convert log attenuation to linear volume
-          linearvol = ((attenuation & 0x3F) ^ 0x7F) + 1;
-          s *= linearvol; s >>= 7 + (attenuation >> 6);
-        }
-        // Apply MAME envelope generator
-        if(chan->EG.state==ATTACK)
-          s=(s*EG_Update(chan))>>SHIFT;
-        else
-#if SHIFT >= 10
-          s=(s*EG_TABLE[EG_Update(chan)>>(SHIFT-10)])>>SHIFT;
-#else
-          s=(s*EG_TABLE[EG_Update(chan)<<(10-SHIFT)])>>SHIFT;
-#endif
-      }
       // Apply filter, if we want it
+      sint32 s = AICA_UpdateSlot(state, chan);
       if(!(chan->lpoff)) {
         uint32 fv = chan->lpflevel;
         uint32 qv = chan->q & 0x1F;
@@ -2413,20 +2587,12 @@ static uint32 generate_samples(
       }
       // Write output
       buf[g] = s;
-
-      if(mdlsrc) {
-        sint32 sample = (s * vol_l) >> (SHIFT+1);
-        state->ringbuf[state->bufptr] = (sint16)sample;
-      }
     }
+    state->bufptr = (state->bufptr + 32) & (32*RINGMAX-1);
     //
     // Now we need to advance the channel state machine, regardless of
     // whether we're generating output or not
     //
-    //
-    // Advance LFO phase
-    //
-    chan->lfophase += lfophaseinc;
     //
     // Advance filter envelope
     //
@@ -2445,60 +2611,6 @@ static uint32 generate_samples(
         } else {
           if(chan->lpfstate < 3) { chan->lpfstate++; }
         }
-      }
-    }
-    //
-    // Advance the sample phase
-    //
-    { uint32 realphaseinc = base_phaseinc;
-      //
-      // LFO pitch shifting
-      //
-      if(chan->plfos) {
-        uint32 pitch_wave_y = 0;
-        switch(chan->plfows) {
-        case 0: // sawtooth
-          pitch_wave_y = chan->lfophase ^ 0x80000000;
-          break;
-        case 1: // square
-          pitch_wave_y = (chan->lfophase & 0x80000000) ? 0 : 0xFFFFFFFF;
-          break;
-        case 2: // triangle
-          pitch_wave_y = (chan->lfophase << 1) + 0x80000000;
-          if(chan->lfophase >= 0x40000000 && chan->lfophase < 0xC0000000) {
-            pitch_wave_y = ~pitch_wave_y;
-          }
-          break;
-        case 3: // noise
-          pitch_wave_y = yamrand16(state) << 16;
-          break;
-        }
-        { uint32 maxvary = base_phaseinc >> (10-(chan->plfos));
-          uint32 scaled_pitch_wave_y =
-            (((uint64)(maxvary*2)) * ((uint64)pitch_wave_y)) >> 32;
-          realphaseinc = base_phaseinc + scaled_pitch_wave_y - maxvary;
-        }
-      }
-      //
-      // Calculate modulation offset for next sample(s) decoded
-      //
-      chan->playpos_offset = 0;
-      if(chan->mdl && chan->mdxsl && chan->mdysl) {
-        sint32 smp = ((sint32)(state->ringbuf[(state->bufptr - 64 + chan->mdxsl)&(32*RINGMAX-1)]) + (sint32)(state->ringbuf[(state->bufptr - 64 + chan->mdysl)&(32*RINGMAX-1)])) / 2;
-
-        smp <<= 0x0A;
-        smp >>= 0x1A - chan->mdl;
-
-        chan->playpos_offset = smp;
-      }
-      state->bufptr = (state->bufptr + 32) & (32*RINGMAX-1);
-      //
-      // Advance phase, and read new sample data if necessary
-      //
-      chan->frcphase += realphaseinc;
-      while(chan->frcphase >= 0x40000) {
-        chan->frcphase -= 0x40000;
-        readnextsample(state, chan, odometer);
       }
     }
     // Advance our temporary odometer copy
@@ -3206,18 +3318,16 @@ fclose(f);
   // Scale, clip and copy output
   //
   if(buf) {
-    sint32 vol_l, shift;
-    convert_stereo_send_level(0x00, state->mvol, 0x00, &vol_l, &shift, 2);
-    shift = SHIFT + 3 + state->version;
+    sint32 vol_l, vol_r;
+	const sint32 shift = SHIFT + 3 + state->version;
+    convert_stereo_send_level(0x00, state->mvol, 0x00, &vol_l, &vol_r, 2);
     for(i = 0; i < samples; i++) {
       sint32 l = outbuf[2 * i + 0];
       sint32 r = outbuf[2 * i + 1];
       l *= vol_l; l >>= shift;
       r *= vol_l; r >>= shift;
-      if(l < (-0x8000)) l = (-0x8000);
-      if(r < (-0x8000)) r = (-0x8000);
-      if(l > ( 0x7FFF)) l = ( 0x7FFF);
-      if(r > ( 0x7FFF)) r = ( 0x7FFF);
+	  l = ICLIP16(l);
+	  r = ICLIP16(r);
       buf[2 * i + 0] = l;
       buf[2 * i + 1] = r;
     }
