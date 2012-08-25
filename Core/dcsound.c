@@ -60,7 +60,7 @@ uint32 EMU_CALL dcsound_get_state_size(void) {
   offset += sizeof(struct ARM_MEMORY_MAP) * dcsound_map_store_entries;
   offset += arm_get_state_size();
   offset += yam_get_state_size(2);
-  offset += 0x200000;
+  offset += 0x800000;
   return offset;
 }
 
@@ -79,12 +79,12 @@ void EMU_CALL dcsound_clear_state(void *state) {
   DCSOUNDSTATE->offset_to_map_store = offset; offset += sizeof(struct ARM_MEMORY_MAP) * dcsound_map_store_entries;
   DCSOUNDSTATE->offset_to_arm       = offset; offset += arm_get_state_size();
   DCSOUNDSTATE->offset_to_yam       = offset; offset += yam_get_state_size(2);
-  DCSOUNDSTATE->offset_to_ram       = offset; offset += 0x200000;
+  DCSOUNDSTATE->offset_to_ram       = offset; offset += 0x800000;
 
   //
   // Take care of substructures
   //
-  memset(RAMBYTEPTR, 0, 0x200000);
+  memset(RAMBYTEPTR, 0, 0x800000);
 
   recompute_memory_maps(DCSOUNDSTATE);
 
@@ -93,7 +93,7 @@ void EMU_CALL dcsound_clear_state(void *state) {
   arm_set_memory_maps(ARMSTATE, MAPLOAD, MAPSTORE);
 
   yam_clear_state(YAMSTATE, 2);
-  yam_setram(YAMSTATE, (uint32*)(RAMBYTEPTR), 0x200000, EMU_ENDIAN_XOR(3), EMU_ENDIAN_XOR(2));
+  yam_setram(YAMSTATE, (uint32*)(RAMBYTEPTR), 0x800000, EMU_ENDIAN_XOR(3), EMU_ENDIAN_XOR(2));
   //
   // We want to initialize the Yamaha interrupt system here, because some
   // homebrew DC stuff expects it'll start at the BIOS-initialized values
@@ -155,7 +155,7 @@ static void location_check(struct DCSOUND_STATE *state) {
     recompute_memory_maps(state);
     arm_set_advance_callback(ARMSTATE, dcsound_advance, DCSOUNDSTATE);
     arm_set_memory_maps(ARMSTATE, MAPLOAD, MAPSTORE);
-    yam_setram(YAMSTATE, (uint32*)(RAMBYTEPTR), 0x200000, EMU_ENDIAN_XOR(3), EMU_ENDIAN_XOR(2));
+    yam_setram(YAMSTATE, (uint32*)(RAMBYTEPTR), 0x800000, EMU_ENDIAN_XOR(3), EMU_ENDIAN_XOR(2));
     state->myself = state;
   }
 }
@@ -266,13 +266,13 @@ static void EMU_CALL catcher_sw(void *state, uint32 a, uint32 d, uint32 mask) { 
 //
 
 static const struct ARM_MEMORY_MAP dcsound_map_load[] = {
-  { 0x00000000, 0x001FFFFF, { 0x001FFFFF, ARM_MAP_TYPE_POINTER , NULL } },
+  { 0x00000000, 0x007FFFFF, { 0x007FFFFF, ARM_MAP_TYPE_POINTER , NULL } },
   { 0x00800000, 0x0080FFFF, { 0x0000FFFF, ARM_MAP_TYPE_CALLBACK, dcsound_yam_lw               } },
   { 0x00000000, 0xFFFFFFFF, { 0xFFFFFFFF, ARM_MAP_TYPE_CALLBACK, catcher_lw                   } }
 };
 
 static const struct ARM_MEMORY_MAP dcsound_map_store[] = {
-  { 0x00000000, 0x001FFFFF, { 0x001FFFFF, ARM_MAP_TYPE_POINTER , NULL } },
+  { 0x00000000, 0x007FFFFF, { 0x007FFFFF, ARM_MAP_TYPE_POINTER , NULL } },
   { 0x00800000, 0x0080FFFF, { 0x0000FFFF, ARM_MAP_TYPE_CALLBACK, dcsound_yam_sw               } },
   { 0x00000000, 0xFFFFFFFF, { 0xFFFFFFFF, ARM_MAP_TYPE_CALLBACK, catcher_sw                   } }
 };
@@ -415,11 +415,11 @@ sint32 EMU_CALL dcsound_execute(
 // Get / set memory words with no side effects
 //
 uint32 EMU_CALL dcsound_getword(void *state, uint32 a) {
-  return *((uint32*)(RAMBYTEPTR+(a&0x1FFFFC)));
+  return *((uint32*)(RAMBYTEPTR+(a&0x7FFFFC)));
 }
 
 void EMU_CALL dcsound_setword(void *state, uint32 a, uint32 d) {
-  *((uint32*)(RAMBYTEPTR+(a&0x1FFFFC))) = d;
+  *((uint32*)(RAMBYTEPTR+(a&0x7FFFFC))) = d;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -434,7 +434,7 @@ void EMU_CALL dcsound_upload_to_ram(
 ) {
   uint32 i;
   for(i = 0; i < len; i++) {
-    (RAMBYTEPTR)[((address+i)^(EMU_ENDIAN_XOR(3)))&0x1FFFFF] =
+    (RAMBYTEPTR)[((address+i)^(EMU_ENDIAN_XOR(3)))&0x7FFFFF] =
       ((uint8*)src)[i];
   }
 }
