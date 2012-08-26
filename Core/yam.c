@@ -2462,7 +2462,7 @@ static sint32 AICA_UpdateSlot(struct YAM_STATE *state, struct YAM_CHAN *chan)
       if(*addr[addr_select]>=chan->loopend) {
         rem_addr = *slot_addr[addr_select] - (chan->loopend<<SHIFT);
         *slot_addr[addr_select]=(chan->loopstart<<SHIFT) + rem_addr;
-		if(chan->pcms>=2) {
+        if(chan->pcms>=2) {
           // restore the state @ LSA - the sampler will naturally walk to (LSA + remainder)
           chan->adbase = (chan->sampleaddr+(chan->loopstart/2))&state->ram_mask;
           chan->curstep = chan->loopstart;
@@ -3253,14 +3253,26 @@ static void render_effects(
 //
 // Must not render more than RENDERMAX samples at a time
 //
+struct render_priority 
+{
+  sint32 channel_number;
+  sint32 priority_level;
+};
+int __cdecl render_priority_compare(void * a, void * b) {
+  struct render_priority *_a = (struct render_priority *) a;
+  struct render_priority *_b = (struct render_priority *) b;
+  return _b->priority_level - _a->priority_level;
+}
 static void render(struct YAM_STATE *state, uint32 odometer, uint32 samples) {
-  uint32 i;
+  uint32 i, j;
+  struct render_priority priority_list[64];
   sint32 outbuf[2*RENDERMAX];
   sint32 fxbus[16*RENDERMAX];
   sint32 *directout;
 //  sint32 *fxout;
   sint16 *buf;
   uint32 nchannels;
+  uint32 bufptr_base;
   int wantreverb = 0;
   if(!samples) return;
   buf = YAMSTATE->out_buf;
@@ -3298,18 +3310,37 @@ fclose(f);
     if(wantreverb) memset(fxbus, 0, 4*16*samples);
   }
   //
+  // Figure out if any channels need to be rendered before others
+  //
+  for(i = 0; i < nchannels; i++) {
+    priority_list[i].channel_number = i;
+    priority_list[i].priority_level = 0;
+  }
+  if (state->version == 1) {
+    for(i = 0; i < nchannels; i++) {
+      struct YAM_CHAN *chan = state->chan + i;
+	  sint32 priority_level = priority_list[i].priority_level + 1;
+      if (chan->mdxsl) priority_list[(i+chan->mdxsl)&31].priority_level = priority_level;
+      if (chan->mdysl) priority_list[(i+chan->mdysl)&31].priority_level = priority_level;
+    }
+    qsort(&priority_list, nchannels, sizeof(*priority_list), render_priority_compare);
+  }
+  bufptr_base = state->bufptr;
+  //
   // Render each channel
   //
   for(i = 0; i < nchannels; i++) {
-    struct YAM_CHAN *chan = state->chan + i;
+    struct YAM_CHAN *chan;
+    j = priority_list[i].channel_number;
+    chan = state->chan + j;
+    state->bufptr = bufptr_base + j;
 // is 11
     render_and_add_channel(state, chan, directout,
       wantreverb ? (fxbus + chan->dspchan) : NULL,
       odometer, samples
     );
-    state->bufptr = (state->bufptr + 1) & (32*RINGMAX-1);
   }
-  state->bufptr = (state->bufptr + (32*(samples-1))) & (32*RINGMAX-1);
+  state->bufptr = (bufptr_base + (32*samples)) & (32*RINGMAX-1);
   //
   // Emulate DSP effects if desired
   //
@@ -3319,15 +3350,15 @@ fclose(f);
   //
   if(buf) {
     sint32 vol_l, vol_r;
-	const sint32 shift = SHIFT + 3 + state->version;
+    const sint32 shift = SHIFT + 3 + state->version;
     convert_stereo_send_level(0x00, state->mvol, 0x00, &vol_l, &vol_r, 2);
     for(i = 0; i < samples; i++) {
       sint32 l = outbuf[2 * i + 0];
       sint32 r = outbuf[2 * i + 1];
       l *= vol_l; l >>= shift;
       r *= vol_l; r >>= shift;
-	  l = ICLIP16(l);
-	  r = ICLIP16(r);
+      l = ICLIP16(l);
+      r = ICLIP16(r);
       buf[2 * i + 0] = l;
       buf[2 * i + 1] = r;
     }
