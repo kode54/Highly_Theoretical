@@ -1843,11 +1843,18 @@ uint32 EMU_CALL yam_scsp_load_reg(void *state, uint32 a, uint32 mask) {
   case 0x406: d = 0; break; // MIDI output, unimplemented
   case 0x408: // CallAddress (playpos in increments of 4K)
     { int c = (YAMSTATE->mslc) & 0x1F;
+	  int sgc, ca, eg;
+	  struct YAM_CHAN * chan;
 
       if(YAMSTATE->out_pending > 0) yam_flush(YAMSTATE);
 
-      d = YAMSTATE->chan[c].cur_addr >> (SHIFT+5);
-      d &= 0xF000; d >>= 5;
+	  chan = YAMSTATE->chan + c;
+
+	  sgc = chan->EG.state & 3;
+	  ca = ( chan->cur_addr >> (SHIFT + 12) ) & 0xf;
+	  eg = ( 0x1f - ( chan->EG.volume >> (EG_SHIFT + 5) ) ) & 0x1f;
+
+	  d = (c << 11) | (ca << 7) | (sgc << 5) | eg;
 
 //
 // might only be checking when envstate is release anyway?
