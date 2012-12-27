@@ -132,7 +132,7 @@
     <ClCompile Include="yam.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\emuconfig.h" />
+    <ClInclude Include="emuconfig.h" />
     <ClInclude Include="arm.h" />
     <ClInclude Include="c68k\c68k.h" />
     <ClInclude Include="c68k\core.h" />

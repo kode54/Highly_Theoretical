@@ -7,7 +7,7 @@
 #ifndef __SEGA_SATSOUND_H__
 #define __SEGA_SATSOUND_H__
 
-#include "../../emuconfig.h"
+#include "emuconfig.h"
 
 /////////////////////////////////////////////////////////////////////////////
 

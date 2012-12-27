@@ -7,7 +7,7 @@
 #ifndef __SEGA_ARM_H__
 #define __SEGA_ARM_H__
 
-#include "../../emuconfig.h"
+#include "emuconfig.h"
 
 #ifdef __cplusplus
 extern "C" {

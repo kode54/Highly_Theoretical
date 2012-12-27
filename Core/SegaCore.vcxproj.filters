@@ -61,7 +61,7 @@
     <ClInclude Include="yam.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\emuconfig.h">
+    <ClInclude Include="emuconfig.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="c68k\c68k.h">
