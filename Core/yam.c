@@ -16,6 +16,7 @@
 #elif defined(HAVE_MPROTECT)
 #include <unistd.h>
 #include <sys/mman.h>
+#include <errno.h>
 #endif
 
 #include <math.h>
@@ -23,6 +24,14 @@
 #ifndef _WIN32
 #define __cdecl
 #define __fastcall __attribute__((regparm(3)))
+#endif
+
+/* No dynarec for x86_64 yet */
+#if defined(_WIN32) || defined(__i386__)
+#define ENABLE_DYNAREC
+#endif
+#if defined(_WIN64) || defined(__amd64__)
+#undef ENABLE_DYNAREC
 #endif
 
 // no 'conversion from _blah_ possible loss of data' warnings
@@ -621,8 +630,10 @@ struct YAM_STATE {
   uint32 odometer;
   uint8 dry_out_enabled;
   uint8 dsp_emulation_enabled;
+#ifdef ENABLE_DYNAREC
   uint8 dsp_dyna_enabled;
   uint8 dsp_dyna_valid;
+#endif
   uint32 randseed;
   uint32 mem_word_address_xor;
   uint32 mem_byte_address_xor;
@@ -694,7 +705,9 @@ struct YAM_STATE {
   //
   // Buffer for dynarec code
   //
+#ifdef ENABLE_DYNAREC
   uint8 dynacode[DYNACODE_MAX_SIZE];
+#endif
 };
 
 //
@@ -742,7 +755,9 @@ void EMU_CALL yam_clear_state(void *state, uint8 version) {
   YAMSTATE->dsp_emulation_enabled = 1;
 
   // Enable DSP dynarec
+#ifdef ENABLE_DYNAREC
   YAMSTATE->dsp_dyna_enabled = 1;
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -808,7 +823,9 @@ void EMU_CALL yam_setram(void *state, uint32 *ram, uint32 size, uint8 mbx, uint8
   //
   // Invalidate dynarec code
   //
+#ifdef ENABLE_DYNAREC
   YAMSTATE->dsp_dyna_valid = 0;
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -830,12 +847,16 @@ void EMU_CALL yam_enable_dry(void *state, uint8 enable) {
 
 void EMU_CALL yam_enable_dsp(void *state, uint8 enable) {
   YAMSTATE->dsp_emulation_enabled = (enable != 0);
+#ifdef ENABLE_DYNAREC
   if(enable == 0) { YAMSTATE->dsp_dyna_valid = 0; }
+#endif
 }
 
 void EMU_CALL yam_enable_dsp_dynarec(void *state, uint8 enable) {
+#ifdef ENABLE_DYNAREC
   YAMSTATE->dsp_dyna_enabled = (enable != 0);
   if(enable == 0) { YAMSTATE->dsp_dyna_valid = 0; }
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1641,7 +1662,9 @@ static void coef_write(struct YAM_STATE *state, uint32 n, uint32 d, uint32 mask)
   state->coef[n] &= ~mask;
   state->coef[n] |= d & mask;
   state->coef[n] = ((sint16)(state->coef[n])) >> 3;
+#ifdef ENABLE_DYNAREC
   if(old != state->coef[n]) { state->dsp_dyna_valid = 0; }
+#endif
 }
 
 static void madrs_write(struct YAM_STATE *state, uint32 n, uint32 d, uint32 mask) {
@@ -1650,7 +1673,9 @@ static void madrs_write(struct YAM_STATE *state, uint32 n, uint32 d, uint32 mask
   n &= 0x3F;
   state->madrs[n] &= ~mask;
   state->madrs[n] |= d & mask;
+#ifdef ENABLE_DYNAREC
   if(old != state->madrs[n]) { state->dsp_dyna_valid = 0; }
+#endif
 }
 
 static uint32 temp_read(struct YAM_STATE *state, uint32 n) {
@@ -1763,7 +1788,9 @@ static void dsp_scsp_store_reg(
     if(newvalue != oldvalue) {
       yam_flush(state);
       mpro_scsp_write(state->mpro + index64, newvalue);
+#ifdef ENABLE_DYNAREC
       state->dsp_dyna_valid = 0;
+#endif
     }
     return;
   }
@@ -1814,7 +1841,9 @@ static void dsp_aica_store_reg(
     if(newvalue != oldvalue) {
       yam_flush(state);
       mpro_aica_write(state->mpro + index64, newvalue);
+#ifdef ENABLE_DYNAREC
       state->dsp_dyna_valid = 0;
+#endif
     }
     return;
   }
@@ -2036,7 +2065,9 @@ void EMU_CALL yam_scsp_store_reg(void *state, uint32 a, uint32 d, uint32 mask, u
         YAMSTATE->rbp = oldrbp;
         YAMSTATE->rbl = oldrbl;
         yam_flush(YAMSTATE);
+#ifdef ENABLE_DYNAREC
         YAMSTATE->dsp_dyna_valid = 0;
+#endif
         YAMSTATE->rbp = newrbp;
         YAMSTATE->rbl = newrbl;
       }
@@ -2219,7 +2250,9 @@ void EMU_CALL yam_aica_store_reg(void *state, uint32 a, uint32 d, uint32 mask, u
         YAMSTATE->rbp = oldrbp;
         YAMSTATE->rbl = oldrbl;
         yam_flush(YAMSTATE);
+#ifdef ENABLE_DYNAREC
         YAMSTATE->dsp_dyna_valid = 0;
+#endif
         YAMSTATE->rbp = newrbp;
         YAMSTATE->rbl = newrbl;
       }
@@ -2906,6 +2939,7 @@ static int instruction_uses_shifted(struct MPRO *mpro) {
 // Also uses the current ringbuffer pointer and size, and ram pointer/mask/memwordxor
 // So if any of those change, the compiled dynacode must be invalidated
 //
+#ifdef ENABLE_DYNAREC
 static void dynacompile(struct YAM_STATE *state) {
   // Pre-compute ringbuffer size mask
   uint32 rbmask = (1 << ((state->rbl)+13)) - 1;
@@ -3195,6 +3229,7 @@ static void dynacompile(struct YAM_STATE *state) {
 //{FILE*f=fopen("C:\\Corlett\\yamdyna.bin","wb");if(f){fwrite(state->dynacode,1,0x6000,f);fclose(f);}}
 
 }
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -3215,11 +3250,15 @@ static void render_effects(
   sint32 efvol_l[16];
   sint32 efvol_r[16];
 
+#ifdef ENABLE_DYNAREC
   if(state->dsp_dyna_enabled) {
     if(!(state->dsp_dyna_valid)) {
       dynacompile(state);
     }
     samplefunc = (dsp_sample_t)(((uint8*)(state->dynacode)) + DYNACODE_SLOP_SIZE);
+#else
+  if (0) {
+#endif
   } else {
     samplefunc = dsp_sample_interpret;
   }
@@ -3406,6 +3445,7 @@ void EMU_CALL yam_flush(void *state) {
 // Prepare or unprepare dynacode buffer for execution
 //
 void EMU_CALL yam_prepare_dynacode(void *state) {
+#ifdef ENABLE_DYNAREC
 #ifdef _WIN32
   DWORD i;
   VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_EXECUTE_READWRITE, &i );
@@ -3416,9 +3456,11 @@ void EMU_CALL yam_prepare_dynacode(void *state) {
   unsigned long addr      = ( startaddr & ~(psize - 1) );
   mprotect( (char *) addr, length + startaddr - addr + psize, PROT_READ | PROT_WRITE | PROT_EXEC );
 #endif
+#endif
 }
 
 void EMU_CALL yam_unprepare_dynacode(void *state) {
+#ifdef ENABLE_DYNAREC
 #ifdef _WIN32
   DWORD i;
   VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_READWRITE, &i );
@@ -3428,6 +3470,7 @@ void EMU_CALL yam_unprepare_dynacode(void *state) {
   int           psize     = getpagesize();
   unsigned long addr      = ( startaddr & ~(psize - 1) );
   mprotect( (char *) addr, length + startaddr - addr + psize, PROT_READ | PROT_WRITE );
+#endif
 #endif
 }
 
