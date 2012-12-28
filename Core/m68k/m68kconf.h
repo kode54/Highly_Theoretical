@@ -83,7 +83,12 @@
 /* If ON, the enulation core will use 64-bit integers to speed up some
  * operations.
 */
+
+#if defined(_WIN64) || defined(__amd64__)
+#define M68K_USE_64_BIT  OPT_ON
+#else
 #define M68K_USE_64_BIT  OPT_OFF
+#endif
 
 
 /* ======================================================================== */
