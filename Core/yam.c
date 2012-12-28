@@ -10,9 +10,20 @@
 
 #include "yam.h"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#elif defined(HAVE_MPROTECT)
+#include <unistd.h>
+#include <sys/mman.h>
+#endif
+
 #include <math.h>
+
+#ifndef _WIN32
+#define __cdecl
+#define __fastcall __attribute__((regparm(3)))
+#endif
 
 // no 'conversion from _blah_ possible loss of data' warnings
 #pragma warning (disable: 4244)
@@ -1101,7 +1112,7 @@ void InitADPCM(int *PrevSignal, int *PrevQuant)
 static signed short DecodeADPCM(int *PrevSignal, unsigned char Delta, int *PrevQuant)
 {
   int x = *PrevQuant * quant_mul [Delta & 15];
-  x = *PrevSignal + ((int)(x + ((UINT32)x >> 29)) >> 3);
+  x = *PrevSignal + ((int)(x + ((uint32)x >> 29)) >> 3);
   *PrevSignal=ICLIP16(x);
   *PrevQuant=(*PrevQuant*TableQuant[Delta&7])>>ADPCMSHIFT;
   *PrevQuant=(*PrevQuant<0x7f)?0x7f:((*PrevQuant>0x6000)?0x6000:*PrevQuant);
@@ -2353,7 +2364,7 @@ static int env_needstep(uint32 effrate, uint32 odometer) {
 //
 static sint32 AICA_UpdateSlot(struct YAM_STATE *state, struct YAM_CHAN *chan)
 {
-  INT32 sample, fpart;
+  sint32 sample, fpart;
   int cur_sample;       //current sample
   int nxt_sample;       //next sample
   int step=chan->step;
@@ -2457,7 +2468,7 @@ static sint32 AICA_UpdateSlot(struct YAM_STATE *state, struct YAM_CHAN *chan)
 
   for (addr_select=0;addr_select<2;addr_select++)
   {
-    INT32 rem_addr;
+    sint32 rem_addr;
     switch(chan->sampler_looptype)
     {
     case 0:  //no loop
@@ -3395,13 +3406,29 @@ void EMU_CALL yam_flush(void *state) {
 // Prepare or unprepare dynacode buffer for execution
 //
 void EMU_CALL yam_prepare_dynacode(void *state) {
+#ifdef _WIN32
   DWORD i;
   VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_EXECUTE_READWRITE, &i );
+#elif defined(HAVE_MPROTECT)
+  unsigned long startaddr = &YAMSTATE->dynacode;
+  unsigned long length    = sizeof(YAMSTATE->dynacode);
+  int           psize     = getpagesize();
+  unsigned long addr      = ( startaddr & ~(psize - 1) );
+  mprotect( (char *) addr, length + startaddr - addr + psize, PROT_READ | PROT_WRITE | PROT_EXEC );
+#endif
 }
 
 void EMU_CALL yam_unprepare_dynacode(void *state) {
+#ifdef _WIN32
   DWORD i;
   VirtualProtect( &YAMSTATE->dynacode, sizeof(YAMSTATE->dynacode), PAGE_READWRITE, &i );
+#elif defined(HAVE_MPROTECT)
+  unsigned long startaddr = &YAMSTATE->dynacode;
+  unsigned long length    = sizeof(YAMSTATE->dynacode);
+  int           psize     = getpagesize();
+  unsigned long addr      = ( startaddr & ~(psize - 1) );
+  mprotect( (char *) addr, length + startaddr - addr + psize, PROT_READ | PROT_WRITE );
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////

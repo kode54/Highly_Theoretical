@@ -14,7 +14,9 @@
 #include "dcsound.h"
 #include "arm.h"
 #include "yam.h"
+#ifdef USE_STARSCREAM
 #include "Starscream/starcpu.h"
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 //
