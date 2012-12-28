@@ -10,7 +10,11 @@ TARGET = SegaCore
 TEMPLATE = lib
 CONFIG += staticlib
 
-DEFINES += EMU_COMPILE EMU_LITTLE_ENDIAN HAVE_STDINT_H USE_M68K HAVE_MPROTECT
+# C68K: C68K_NO_JUMP_TABLE
+# M68K: USE_M68K and LSB_FIRST if host is little endian
+# Starscream: USE_STARSCREAM
+
+DEFINES += EMU_COMPILE EMU_LITTLE_ENDIAN HAVE_STDINT_H USE_M68K LSB_FIRST HAVE_MPROTECT
 
 SOURCES += \
     sega.c \
@@ -18,8 +22,8 @@ SOURCES += \
     satsound.c \
     yam.c \
     arm.c \
-    m68k/m68kcpu.c \
-    m68k/m68kops.c
+    m68k/m68kops.c \
+    m68k/m68kcpu.c
 
 HEADERS += \
     sega.h \
