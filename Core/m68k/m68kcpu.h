@@ -699,11 +699,11 @@ char* m68ki_disassemble_quick(unsigned int pc, unsigned int cpu_type);
 /* ======================================================================== */
 
 
-#define m68k_read_immediate_16(M, address) *(uint16 *)((M)->memory_map[((address)>>16)&0xff].base + ((address) & 0xffff))
+#define m68k_read_immediate_16(M, address) (m68ki_read_16((M), address))
 #define m68k_read_immediate_32(M, address) (m68k_read_immediate_16(M, address) << 16) | (m68k_read_immediate_16(M, address+2))
 
 /* Read data relative to the PC */
-#define m68k_read_pcrelative_8(M, address)  READ_BYTE((M)->memory_map[((address)>>16)&0xff].base, (address) & 0xffff)
+#define m68k_read_pcrelative_8(M, address)  (m68ki_read_8((M), address))
 #define m68k_read_pcrelative_16(M, address) m68k_read_immediate_16(M, address)
 #define m68k_read_pcrelative_32(M, address) m68k_read_immediate_32(M, address)
 

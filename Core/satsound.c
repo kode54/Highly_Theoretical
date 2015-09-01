@@ -23,10 +23,13 @@
 
 #include "yam.h"
 
+#include "../vgmwrite.h"
+
 /////////////////////////////////////////////////////////////////////////////
 //
 // Static information
 //
+static int vgm_idx;
 sint32 EMU_CALL satsound_init(void) { return 0; }
 
 #define CYCLES_PER_SAMPLE (256)
@@ -239,6 +242,8 @@ void EMU_CALL satsound_clear_state(void *state) {
   yam_clear_state(YAMSTATE, 1);
   // No idea what to initialize the interrupt system to, so leave it alone
 
+  vgm_idx = vgm_open(VGMC_SCSP, 44100 * 256);
+
   //
   // Compute all location-dependent pointers
   //
@@ -270,6 +275,8 @@ void EMU_CALL satsound_upload_to_ram(
       ((uint8*)src)[i];
   }
 
+  vgm_write_large_data(vgm_idx, 0x01, 512 * 1024, address, len, src);
+
 #ifdef USE_STARSCREAM
   s68000_reset(SCPUSTATE);
 #elif defined(USE_M68K)
@@ -293,6 +300,7 @@ static void sync_sound(struct SATSOUND_STATE *state) {
       samples = state->sound_samples_remaining;
     }
     if(samples > 0) {
+      vgm_advance(samples);
       yam_advance(YAMSTATE, samples);
       state->cycles_ahead_of_sound -= CYCLES_PER_SAMPLE * samples;
       state->sound_samples_remaining -= samples;
@@ -523,6 +531,7 @@ static unsigned int satsound_apu_read16(void *state, unsigned int address)
 static void satsound_apu_write8(void *state, unsigned int address, unsigned int data)
 {
   if (address >= 0x100000 && address < 0x100c00) {
+    vgm_write(vgm_idx, 0x00, address & 0xFFFF, data);
     uint8 breakcpu = 0;
     int shift = ((address & 1) ^ 1) * 8;
     satsound_advancesync(SATSOUNDSTATE);
@@ -544,6 +553,8 @@ static void satsound_apu_write8(void *state, unsigned int address, unsigned int 
 static void satsound_apu_write16(void *state, unsigned int address, unsigned int data)
 {
   if (address >= 0x100000 && address < 0x100c00) {
+    vgm_write(vgm_idx, 0x00, (address & 0xFFFF) | 0x00, (data & 0xFF00) >> 8);
+    vgm_write(vgm_idx, 0x00, (address & 0xFFFF) | 0x01, (data & 0x00FF) >> 0);
     uint8 breakcpu = 0;
     satsound_advancesync(SATSOUNDSTATE);
     //printf("satsound_yam_writebyte(%08X,%08X)\n",address,data);
@@ -561,6 +572,31 @@ static void satsound_apu_write16(void *state, unsigned int address, unsigned int
   }
 }
 
+static unsigned int satsound_mem_read8(void *state, unsigned int address)
+{
+  return ((unsigned char*)RAMBYTEPTR)[address ^ EMU_ENDIAN_XOR(1)^1];
+}
+
+static unsigned int satsound_mem_read16(void *state, unsigned int address)
+{
+  return ((unsigned short*)RAMBYTEPTR)[address / 2];
+}
+
+#define ADDR_HIGH(x)	(((x) >> 16) & 0x07)
+#define ADDR_LOW(x)		((x) & 0xFFFF)
+static void satsound_mem_write8(void *state, unsigned int address, unsigned int data)
+{
+  ((unsigned char*)RAMBYTEPTR)[address ^ EMU_ENDIAN_XOR(1)^1] = (unsigned char)data;
+  vgm_write(vgm_idx, 0x80 | ADDR_HIGH(address), ADDR_LOW(address), data);
+}
+
+static void satsound_mem_write16(void *state, unsigned int address, unsigned int data)
+{
+  ((unsigned short*)RAMBYTEPTR)[address / 2] = (unsigned short)data;
+  vgm_write(vgm_idx, 0x80 | ADDR_HIGH(address), ADDR_LOW(address) | 0x00, (data & 0xFF00) >> 8);
+  vgm_write(vgm_idx, 0x80 | ADDR_HIGH(address), ADDR_LOW(address) | 0x01, (data & 0x00FF) >> 0);
+}
+
 static void recompute_and_set_memory_maps(
   struct SATSOUND_STATE *state
 ) {
@@ -568,12 +604,12 @@ static void recompute_and_set_memory_maps(
   cpu_memory_map * map;
   for(i = 0; i < 8; i++) {
     map = SCPUSTATE->memory_map + i;
-    map->param = NULL;
-    map->base = RAMBYTEPTR + (i << 16);
-    map->read8 = NULL;
-    map->read16 = NULL;
-    map->write8 = NULL;
-    map->write16 = NULL;
+    map->param = state;
+    map->base = NULL;
+    map->read8 = satsound_mem_read8;
+    map->read16 = satsound_mem_read16;
+    map->write8 = satsound_mem_write8;
+    map->write16 = satsound_mem_write16;
   }
   for(; i < 0x10; i++) {
     map = SCPUSTATE->memory_map + i;
