@@ -242,7 +242,7 @@ void EMU_CALL satsound_clear_state(void *state) {
   yam_clear_state(YAMSTATE, 1);
   // No idea what to initialize the interrupt system to, so leave it alone
 
-  vgm_idx = vgm_open(VGMC_SCSP, 44100 * 256);
+  vgm_idx = vgm_open(VGMC_SCSP, 44100 * 512);
 
   //
   // Compute all location-dependent pointers
@@ -587,12 +587,16 @@ static unsigned int satsound_mem_read16(void *state, unsigned int address)
 static void satsound_mem_write8(void *state, unsigned int address, unsigned int data)
 {
   ((unsigned char*)RAMBYTEPTR)[address ^ EMU_ENDIAN_XOR(1)^1] = (unsigned char)data;
+  if (address < 0x10000)
+    return;
   vgm_write(vgm_idx, 0x80 | ADDR_HIGH(address), ADDR_LOW(address), data);
 }
 
 static void satsound_mem_write16(void *state, unsigned int address, unsigned int data)
 {
   ((unsigned short*)RAMBYTEPTR)[address / 2] = (unsigned short)data;
+  if (address < 0x10000)
+    return;
   vgm_write(vgm_idx, 0x80 | ADDR_HIGH(address), ADDR_LOW(address) | 0x00, (data & 0xFF00) >> 8);
   vgm_write(vgm_idx, 0x80 | ADDR_HIGH(address), ADDR_LOW(address) | 0x01, (data & 0x00FF) >> 0);
 }

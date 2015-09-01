@@ -8,6 +8,54 @@
 
 #include "../psflib/psflib.h"
 
+#define BORK_TIME 0xC0CAC01A
+
+static unsigned long parse_time_crap(const char *input)
+{
+    unsigned long value = 0;
+    unsigned long multiplier = 1000;
+    const char * ptr = input;
+    unsigned long colon_count = 0;
+
+    while (*ptr && ((*ptr >= '0' && *ptr <= '9') || *ptr == ':'))
+    {
+        colon_count += *ptr == ':';
+        ++ptr;
+    }
+    if (colon_count > 2) return BORK_TIME;
+    if (*ptr && *ptr != '.' && *ptr != ',') return BORK_TIME;
+    if (*ptr) ++ptr;
+    while (*ptr && *ptr >= '0' && *ptr <= '9') ++ptr;
+    if (*ptr) return BORK_TIME;
+
+    ptr = strrchr(input, ':');
+    if (!ptr)
+        ptr = input;
+    for (;;)
+    {
+        char * end;
+        if (ptr != input) ++ptr;
+        if (multiplier == 1000)
+        {
+            double temp = strtod(ptr, &end);
+            if (temp >= 60.0) return BORK_TIME;
+            value = (long)(temp * 1000.0f);
+        }
+        else
+        {
+            unsigned long temp = strtoul(ptr, &end, 10);
+            if (temp >= 60 && multiplier < 3600000) return BORK_TIME;
+            value += temp * multiplier;
+        }
+        if (ptr == input) break;
+        ptr -= 2;
+        while (ptr > input && *ptr != ':') --ptr;
+        multiplier *= 60;
+    }
+
+    return value;
+}
+
 inline unsigned get_le32( void const* p )
 {
     return  (unsigned) ((unsigned char const*) p) [3] << 24 |
@@ -28,6 +76,9 @@ struct sdsf_loader_state
 {
     uint8_t * data;
     size_t data_size;
+
+    unsigned long length_ms;
+    unsigned long fade_ms;
 };
 
 int sdsf_loader(void * context, const uint8_t * exe, size_t exe_size,
@@ -79,6 +130,26 @@ int sdsf_loader(void * context, const uint8_t * exe, size_t exe_size,
     return 0;
 }
 
+int sdsf_tags(void * context, const char * name, const char * value)
+{
+  struct sdsf_loader_state * state = ( struct sdsf_loader_state * ) context;
+
+  if ( !strcasecmp(name, "length") )
+  {
+    unsigned long time = parse_time_crap( value );
+    if ( time != BORK_TIME )
+      state->length_ms = time;
+  }
+  else if ( !strcasecmp(name, "fade") )
+  {
+    unsigned long time = parse_time_crap( value );
+    if ( time != BORK_TIME )
+      state->fade_ms = time;
+  }
+
+  return 0;
+}
+
 static void * psf_file_fopen( const char * uri )
 {
     return fopen( uri, "rb" );
@@ -120,7 +191,7 @@ void rip_vgm(const char * name)
   struct sdsf_loader_state state;
   memset(&state, 0, sizeof(state));
 
-  if (psf_load(name, &psf_file_system, 0x11, sdsf_loader, &state, 0, 0, 0) <= 0)
+  if (psf_load(name, &psf_file_system, 0x11, sdsf_loader, &state, sdsf_tags, &state, 0) <= 0)
   {
       return;
   }
@@ -153,7 +224,15 @@ void rip_vgm(const char * name)
 
   free(state.data);
 
-  for (int i = 0; i < 44100 * 60 * 10; i += 512)
+  unsigned long samples_to_play = 0;
+
+  if (state.length_ms)
+    samples_to_play = (state.length_ms + state.fade_ms) * 441 / 10;
+
+  if (!samples_to_play)
+    samples_to_play = 44100 * (3 * 60 + 10);
+
+  for (int i = 0; i < samples_to_play; i += 512)
   {
     unsigned int count = 512;
     sega_execute(emu, 0x7fffffff, 0, &count);

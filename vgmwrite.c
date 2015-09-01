@@ -1375,7 +1375,7 @@ static void vgm_write_delay(uint16_t vgm_id)
 	uint16_t delaywrite;
 
 	VI = &VgmFile[vgm_id];
-	if (! VI->WroteHeader && VI->EvtDelay)
+	if (! VI->WroteHeader)
 		vgm_header_postwrite(vgm_id);	// write post-header data
 
 	if (VI->EvtDelay)
