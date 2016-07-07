@@ -97,12 +97,12 @@ static const uint8 envdecayvalue[0x3D][4] = {
 /* 38-3C */ {4,4,4,4},{8,4,4,4},{8,4,8,4},{8,8,8,4},{8,8,8,8}
 };
 
-static const int adpcmscale[8] = {
-    0xE6, 0xE6, 0xE6, 0xE6, 0x133, 0x199, 0x200, 0x266
+static const sint32 adpcmscale[8] = {
+  0x0E6, 0x0E6, 0x0E6, 0x0E6, 0x133, 0x199, 0x200, 0x266
 };
 
-static const int adpcmdiff[8] = {
-    1, 3, 5, 7, 9, 11, 13, 15
+static const sint32 adpcmdiff[8] = {
+ 1, 3, 5, 7, 9, 11, 13, 15
 };
 
 static const sint32 qtable[32] = {
